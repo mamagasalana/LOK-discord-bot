@@ -1,0 +1,26 @@
+.
+|-- __pycache__
+|   |-- __init__.cpython-312.pyc
+|   |-- config.cpython-312.pyc
+|   |-- lokbot.cpython-312.pyc
+|   `-- verify_button.cpython-312.pyc
+|-- discord_bot
+|   |-- bot
+|   |   |-- __init__.py
+|   |   |-- __pycache__
+|   |   |   |-- __init__.cpython-312.pyc
+|   |   |   `-- bot.cpython-312.pyc
+|   |   |-- bot.py
+|   |   |-- commands.py
+|   |   |-- events.py
+|   |   `-- tasks.py
+|   |-- config
+|   |   |-- __init__.py
+|   |   `-- config.py
+|   `-- services
+|       |-- __init__.py
+|       `-- authentication.py
+|-- main.py
+`-- structure.txt
+
+6 directories, 17 files

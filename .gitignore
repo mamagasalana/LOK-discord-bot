@@ -1,0 +1,6 @@
+# Example .gitignore content
+venv/
+logs/
+*.pyc
+__pycache__/
+.env

@@ -1,21 +1,12 @@
-
-import os
 import logging
 from discord_bot.bot.bot import LOKBOT
 from discord_bot.config.config import CHANNEL_ID, TOKEN
+from discord_bot.utils.logger import setup_logging
+
 
 def main():
-    # Check if the logs directory exists, if not, create it
-    if not os.path.exists('logs'):
-        os.makedirs('logs')
-
-    # Configure logging
-    logging.basicConfig(
-        filename='logs/bot.log', 
-        level=logging.INFO, 
-        format='%(asctime)s - %(levelname)s - %(message)s'
-    )
-    # Log the start of the bot
+    # Setup logging
+    setup_logging()
     logging.info('Starting LOK Discord Bot')
     
     # Initialize and start the bot

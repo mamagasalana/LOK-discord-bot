@@ -11,6 +11,15 @@
             "program": "${workspaceFolder}/src/main.py",
             "console": "integratedTerminal",
             "envFile": "${workspaceFolder}/.env"
+        },
+        {
+            "name": "test",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+            
         }
     ]
 }

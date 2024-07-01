@@ -1,5 +1,6 @@
-discord
-requests
-python-dotenv
-pytz
-wasmtime
+discord.py==2.4.0
+requests==2.28.1
+python-dotenv==1.0.1
+pytz==2022.7
+wasmtime==22.0.0
+boto3==1.34.136

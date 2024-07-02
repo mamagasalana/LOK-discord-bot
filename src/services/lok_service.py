@@ -4,7 +4,8 @@ import urllib.parse
 import logging
 from config.config import DYNAMO_DB_NAME, USER, PASSWORD, LOGIN_URL, MAIL_URL
 import pytz
-from db.operations import DynamoDBManager
+from db.repository.user_personal_info_repository import UserPersonalInfoRepository
+from db.repository.user_game_info_repository import UserGameInfoRepository
 
 
 class LokService:
@@ -13,7 +14,8 @@ class LokService:
         self.accessToken = None
         self.codes2discord = {}  # this maps confirmation code to discord user
         self.codes2LOK = {}  # this maps confirmation code to LOK user
-        self.context = DynamoDBManager(DYNAMO_DB_NAME)
+        self.user_game_info_repo = UserGameInfoRepository(DYNAMO_DB_NAME)
+        self.user_personal_info_repo = UserPersonalInfoRepository(DYNAMO_DB_NAME)
 
     # login api to get access token
     def login(self):
@@ -99,4 +101,4 @@ class LokService:
                 self.codes2LOK[subject] = content
 
                 # Store user game info
-                self.context.store_user_game_info(user_id, subject, username, world_id)
+                self.context.store_user_game_info(user_id, username, world_id)

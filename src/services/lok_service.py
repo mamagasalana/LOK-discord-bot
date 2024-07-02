@@ -2,10 +2,10 @@ import datetime
 import requests
 import urllib.parse
 import logging
-from config.config import USER, PASSWORD, LOGIN_URL, MAIL_URL
+from config.config import DYNAMO_DB_NAME, USER, PASSWORD, LOGIN_URL, MAIL_URL
 import pytz
+from db.operations import DynamoDBManager
 
-from db.operations import get_verification_code, store_user_game_info
 
 class LokService:
     def __init__(self):
@@ -13,6 +13,7 @@ class LokService:
         self.accessToken = None
         self.codes2discord = {}  # this maps confirmation code to discord user
         self.codes2LOK = {}  # this maps confirmation code to LOK user
+        self.context = DynamoDBManager(DYNAMO_DB_NAME)
 
     # login api to get access token
     def login(self):
@@ -51,7 +52,8 @@ class LokService:
         if not mails:
             logging.error("Mail not found, something changed in MAIL_URL?")
             return []
-
+        return mails
+    
         # Current time in UTC
         now_utc = datetime.datetime.now(pytz.utc)
 
@@ -87,7 +89,7 @@ class LokService:
             content = mail["content"]
 
             # Verify the code
-            code_item = get_verification_code(user_id, subject)
+            code_item = self.context.get_verification_code(user_id, subject)
             if code_item:
                 print(f"Verification code {subject} found for user {code_item['PK']}")
                 # Add logic here if you want to update the verification status in DynamoDB
@@ -97,4 +99,4 @@ class LokService:
                 self.codes2LOK[subject] = content
 
                 # Store user game info
-                store_user_game_info(user_id, subject, username, world_id)
+                self.context.store_user_game_info(user_id, subject, username, world_id)

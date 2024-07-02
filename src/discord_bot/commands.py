@@ -3,10 +3,9 @@ from discord.ui import Button
 import random
 import string
 import time
-from config.config import CODE_EXPIRY_TIME
+from config.config import CODE_EXPIRY_TIME, DYNAMO_DB_NAME
 from db.models import create_verification_code
-from db.operations import put_item
-
+from db.operations import DynamoDBManager
 
 class VerifyButton(Button):
     def __init__(self):
@@ -14,6 +13,7 @@ class VerifyButton(Button):
         self.codes = {}
         self.user_cool_down = {}  # Track when users last clicked the button
         self.cool_down_duration = int(CODE_EXPIRY_TIME)  # Cool down duration in seconds
+        self.context = DynamoDBManager(DYNAMO_DB_NAME)
 
     async def callback(self, interaction: discord.Interaction):
         user_id = interaction.user.id
@@ -49,7 +49,7 @@ class VerifyButton(Button):
 
         # Add verification code to DynamoDB
         item = create_verification_code(user_id, code)
-        put_item(item)
+        self.context.put_item(item)
 
     def generate_confirmation_code(self, length=6):
         letters_and_digits = string.ascii_letters + string.digits

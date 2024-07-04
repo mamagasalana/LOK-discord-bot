@@ -3,7 +3,7 @@ from discord.ui import Button
 import random
 import string
 import time
-from config.config import CODE_EXPIRY_TIME, DYNAMO_DB_NAME
+from src.config.config import CODE_EXPIRY_TIME, DYNAMO_DB_NAME
 from db.repository.verification_code_repository import VerificationCodeRepository
 
 

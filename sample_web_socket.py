@@ -27,7 +27,7 @@ async def run():
                             raise WSClosedException
                         elif msg.data== '40':
                             # TODO: this input configuration could consist the x, y location
-                            # a sample grab from the game
+                            # sample from the game
                             await ws.send_str('42["/zone/leave/list/v2", {"world":66, "zones":"[0,64,1,65]"}]')
                             await ws.send_str('42["/zone/enter/list/v4", "VVZDX0cIDEdCAgUcDFQbWlVGRlJHIwcLCBYCRw0FB0hcVUkCHwMWFk0YAwxRW0lMBAIHAh1MDQAZV1FQTBgHAB8WKRYcFwcHCAhgSkBLDE4HTQ=="]')
                         elif msg.data.startswith('42'):

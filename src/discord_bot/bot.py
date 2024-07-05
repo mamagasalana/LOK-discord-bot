@@ -6,7 +6,7 @@ from discord.ext import commands, tasks
 from discord_bot.commands import VerifyButton
 from services.lok_service import LokService
 from discord.ui import View
-from src.config.config import TOKEN, CHANNEL_ID, CODE_EXPIRY_TIME
+from config.config import TOKEN, CHANNEL_ID, CODE_EXPIRY_TIME
 
 
 class LOKBOT:

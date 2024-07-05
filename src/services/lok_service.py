@@ -2,7 +2,7 @@ import datetime
 import requests
 import urllib.parse
 import logging
-from src.config.config import DYNAMO_DB_NAME, USER, PASSWORD, LOGIN_URL, MAIL_URL
+from config.config import DYNAMO_DB_NAME, USER, PASSWORD, LOGIN_URL, MAIL_URL
 import pytz
 # from db.repository.user_personal_info_repository import UserPersonalInfoRepository
 # from db.repository.user_game_info_repository import UserGameInfoRepository

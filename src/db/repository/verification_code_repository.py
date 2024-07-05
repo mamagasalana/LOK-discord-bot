@@ -1,4 +1,4 @@
-from src.config.config import CODE_EXPIRY_TIME
+from config.config import CODE_EXPIRY_TIME
 from db.models.models import verification_code
 from db.repository.base_repository import BaseRepository
 from datetime import datetime, timedelta

@@ -4,12 +4,21 @@ import logging
 import json
 import gzip
 import io
+import sys
+import os
+
+
 class WSClosedException(Exception):
     pass
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
+
+
+if not os.path.isdir('logs'):
+    os.mkdir('logs')
 logging.basicConfig(filename=f'logs/wss.log', level=logging.INFO, format='%(levelname)s %(asctime)s %(message)s')
 
-from src.services.lok_service import LokService
+from services.lok_service import LokService
 
 a = LokService()
 a.login()

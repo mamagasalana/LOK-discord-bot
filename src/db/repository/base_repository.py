@@ -2,7 +2,7 @@ import boto3
 from botocore.exceptions import ClientError
 import logging
 
-from src.config.config import AWS_ACCESS_KEY, AWS_REGION, AWS_SECRET_ACCESS_KEY
+from config.config import AWS_ACCESS_KEY, AWS_REGION, AWS_SECRET_ACCESS_KEY
 
 def get_dynamodb_resource():
     """Initialize and return a DynamoDB resource configured with the specified region."""

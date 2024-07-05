@@ -1,6 +1,6 @@
 import boto3
 from botocore.exceptions import ClientError
-from src.config.config import AWS_ACCESS_KEY, AWS_SECRET_ACCESS_KEY, AWS_REGION, DYNAMO_DB_NAME
+from config.config import AWS_ACCESS_KEY, AWS_SECRET_ACCESS_KEY, AWS_REGION, DYNAMO_DB_NAME
 
 # Configure the boto3 resource with AWS credentials
 dynamodb = boto3.resource(

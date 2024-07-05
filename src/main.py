@@ -1,9 +1,9 @@
 import asyncio
 import logging
 from discord_bot.bot import LOKBOT
-from src.config.config import CHANNEL_ID, TOKEN
-from src.config.config import DYNAMO_DB_NAME
-from src.config.logger import setup_logging
+from config.config import CHANNEL_ID, TOKEN
+from config.config import DYNAMO_DB_NAME
+from config.logger import setup_logging
 from db.repository.user_game_info_repository import UserGameInfoRepository
 
 def display_all_game_info():

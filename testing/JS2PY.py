@@ -1,6 +1,7 @@
 from wasmtime import Config, Store, Engine, Module, FuncType, Func, ValType, Instance, Limits, MemoryType, Global, GlobalType, Val, Memory, Table, TableType
 from functools import partial
 import numpy as np
+import codecs
 
 # local modules
 from wasm_base import wasm_base
@@ -36,7 +37,6 @@ class LOK_JS2PY(wasm_base):
             global_STACK_MAX = Global(self.store, global_type32, Val.i32(0))
             
             self.init_base_func()
-            self.init_byte_func()
             
             wasm_args = [memory, 
                     table, 
@@ -51,7 +51,9 @@ class LOK_JS2PY(wasm_base):
 
             self.instance = Instance(self.store, self.wasm_module, wasm_args)
             self.export_wasm_func()
-        self.ws = WebSocketClientManager(self)
+            self.ws = WebSocketClientManager(self)
+
+        self.init_byte_func()
 
     def init_base_func(self):
         self.import_object = {
@@ -1263,6 +1265,10 @@ class LOK_JS2PY(wasm_base):
         self.HEAPF32 = buffer.view(np.float32)
         self.HEAPF64 = buffer.view(np.float64)
 
+    @property
+    def UTF8Decoder(self):
+        return codecs.getincrementaldecoder('utf-8')()
+    
     def lengthBytesUTF8(self, s):
         return len(s.encode('utf-8')) 
 
@@ -1282,8 +1288,12 @@ class LOK_JS2PY(wasm_base):
     def UTF8ToString(self,ptr):
         return self.UTF8ArrayToString(self.HEAPU8, ptr)
 
-    def UTF8ArrayToString(self):
-        pass
+    def UTF8ArrayToString(self, u8Array, idx):
+        endPtr = idx
+        while u8Array[endPtr]:
+            endPtr += 1
+
+        return self.UTF8Decoder.decode(bytes(u8Array[idx:endPtr]))
 
     def Pointer_stringify(self, ptr, length=None):
         if (length == 0 or  not ptr):
@@ -1313,16 +1323,3 @@ class LOK_JS2PY(wasm_base):
             return ret
         
         return self.UTF8ToString(ptr)
-
-################################################################################
-# Example usage
-s = "Hello, 世界"
-out_idx = 0
-max_bytes_to_write = 100
-lok = LOK_JS2PY()
-num_bytes = lok.stringToUTF8Array(s, lok.HEAPU8, out_idx, max_bytes_to_write)
-print(num_bytes)  # Output should be the length in bytes
-print(lok.HEAPU8[:num_bytes + 1])  # Output should contain the UTF-8 encoded string and null terminator
-ptr = 1  # Assuming the string starts at index 0
-out = lok.Pointer_stringify(ptr, 2)  # Output : el
-print(out)

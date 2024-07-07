@@ -1,3497 +1,1328 @@
 from wasmtime import Config, Store, Engine, Module, FuncType, Func, ValType, Instance, Limits, MemoryType, Global, GlobalType, Val, Memory, Table, TableType
-
-config = Config()
-config.wasm_multi_value = True
-engine = Engine()
-
-# Load the Wasm module
-wasm_module = Module.from_file(engine, "testing/LOK.wasm")
-store = Store(engine)
-# Create memory
-limits = Limits(512, None)  # Replace None with maximum size if needed
-memory_type = MemoryType(limits)
-memory = Memory(store, memory_type)
-
-# Create table
-limits = Limits(181773, 181773)
-table_type = TableType(ValType.funcref(), limits)
-table = Table(store, table_type, None)
-
-mutable = False  # Mutable
-global_type32 = GlobalType(ValType.i32(), mutable)
-global_type64 = GlobalType(ValType.f64(), mutable)
-# Create globals
-global_tableBase = Global(store, global_type32, Val.i32(0))
-global_DYNAMICTOP_PTR = Global(store, global_type32, Val.i32(0))
-global_STACKTOP = Global(store, global_type32, Val.i32(0))
-global_STACK_MAX = Global(store, global_type32, Val.i32(0))
-
-################################################################################
-# byte array function
-################################################################################
+from functools import partial
 import numpy as np
-buffer = np.zeros(536870912, dtype=np.uint8)
 
-# Create views of the buffer with different data types
-HEAP8 = buffer.view(np.int8)
-HEAP16 = buffer.view(np.int16)
-HEAP32 = buffer.view(np.int32)
-HEAPU8 = buffer.view(np.uint8)
-HEAPU16 = buffer.view(np.uint16)
-HEAPU32 = buffer.view(np.uint32)
-HEAPF32 = buffer.view(np.float32)
-HEAPF64 = buffer.view(np.float64)
+# local modules
+from wasm_base import wasm_base
+from websocketmanager import WebSocketClientManager
 
-def lengthBytesUTF8(s):
-    return len(s.encode('utf-8')) 
+class LOK_JS2PY(wasm_base):
+    def __init__(self):
+        if 1:
+            self.config = Config()
+            self.config.wasm_multi_value = True
+            self.engine = Engine()
 
-def stringToUTF8Array(s, outU8Array, outIdx, maxBytesToWrite):
-    if not (maxBytesToWrite > 0):
-        return 0
+            # Load the Wasm module
+            self.wasm_module = Module.from_file(self.engine, "testing/LOK.wasm")
+            self.store = Store(self.engine)
+            # Create memory
+            limits = Limits(512, None)  # Replace None with maximum size if needed
+            memory_type = MemoryType(limits)
+            memory = Memory(self.store, memory_type)
 
-    utf8_bytes = s.encode('utf-8')
-    bytes_to_copy = min(len(utf8_bytes), maxBytesToWrite - 1)  # Leave space for the null terminator
+            # Create table
+            limits = Limits(181773, 181773)
+            table_type = TableType(ValType.funcref(), limits)
+            table = Table(self.store, table_type, None)
 
-    # Copy the bytes to the output array
-    outU8Array[outIdx:outIdx + bytes_to_copy] = np.frombuffer(utf8_bytes[:bytes_to_copy], dtype=np.uint8)
-    outU8Array[outIdx + bytes_to_copy] = 0  # Null terminator
+            mutable = False  # Mutable
+            global_type32 = GlobalType(ValType.i32(), mutable)
+            global_type64 = GlobalType(ValType.f64(), mutable)
+            # Create globals
+            global_tableBase = Global(self.store, global_type32, Val.i32(0))
+            global_DYNAMICTOP_PTR = Global(self.store, global_type32, Val.i32(0))
+            global_STACKTOP = Global(self.store, global_type32, Val.i32(0))
+            global_STACK_MAX = Global(self.store, global_type32, Val.i32(0))
+            
+            self.init_base_func()
+            self.init_byte_func()
+            
+            wasm_args = [memory, 
+                    table, 
+                    global_tableBase,
+                    global_DYNAMICTOP_PTR,
+                    global_STACKTOP,
+                    global_STACK_MAX,
+                    Global(self.store, global_type64, Val.f64(float('nan'))),
+                    Global(self.store, global_type64, Val.f64(float('inf'))),
+                    Func(self.store, FuncType([ValType.f64(), ValType.f64()], [ValType.f64()]), pow),
+                    ] + list(self.import_object['env'].values())
 
-    return bytes_to_copy
+            self.instance = Instance(self.store, self.wasm_module, wasm_args)
+            self.export_wasm_func()
+        self.ws = WebSocketClientManager(self)
 
-def UTF8ToString(ptr):
-    return UTF8ArrayToString(HEAPU8, ptr)
+    def init_base_func(self):
+        self.import_object = {
+            "env": {
+                "abort": Func(self.store, FuncType([ValType.i32()], []), self.abort),
+                "enlargeMemory": Func(self.store, FuncType([], [ValType.i32()]), self.enlargeMemory),
+                "getTotalMemory": Func(self.store, FuncType([], [ValType.i32()]), self.getTotalMemory),
+                "abortOnCannotGrowMemory": Func(self.store, FuncType([], [ValType.i32()]), self.abortOnCannotGrowMemory),
+                "invoke_dddi": Func(self.store, FuncType([ValType.i32(),ValType.f64(),ValType.f64(),ValType.i32()], [ValType.f64()]), self.invoke_dddi),
+                "invoke_dii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.f64()]), self.invoke_dii),
+                "invoke_diii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.f64()]), self.invoke_diii),
+                "invoke_diiid": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64()], [ValType.f64()]), self.invoke_diiid),
+                "invoke_diiii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.f64()]), self.invoke_diiii),
+                "invoke_ffffi": Func(self.store, FuncType([ValType.i32(),ValType.f64(),ValType.f64(),ValType.f64(),ValType.i32()], [ValType.f64()]), self.invoke_ffffi),
+                "invoke_fffi": Func(self.store, FuncType([ValType.i32(),ValType.f64(),ValType.f64(),ValType.i32()], [ValType.f64()]), self.invoke_fffi),
+                "invoke_fi": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.f64()]), self.invoke_fi),
+                "invoke_fii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.f64()]), self.invoke_fii),
+                "invoke_fiifi": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32()], [ValType.f64()]), self.invoke_fiifi),
+                "invoke_fiifii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32(),ValType.i32()], [ValType.f64()]), self.invoke_fiifii),
+                "invoke_fiii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.f64()]), self.invoke_fiii),
+                "invoke_fiiif": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64()], [ValType.f64()]), self.invoke_fiiif),
+                "invoke_fiiii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.f64()]), self.invoke_fiiii),
+                "invoke_i": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self.invoke_i),
+                "invoke_ifi": Func(self.store, FuncType([ValType.i32(),ValType.f64(),ValType.i32()], [ValType.i32()]), self.invoke_ifi),
+                "invoke_ii": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_ii),
+                "invoke_iifii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_iifii),
+                "invoke_iii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_iii),
+                "invoke_iiifi": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32()], [ValType.i32()]), self.invoke_iiifi),
+                "invoke_iiii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_iiii),
+                "invoke_iiiifii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_iiiifii),
+                "invoke_iiiii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_iiiii),
+                "invoke_iiiiii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_iiiiii),
+                "invoke_iiiiiii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_iiiiiii),
+                "invoke_iiiiiiii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_iiiiiiii),
+                "invoke_iiiiiiiii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_iiiiiiiii),
+                "invoke_iiiiiiiiii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_iiiiiiiiii),
+                "invoke_iiiiiiiiiii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_iiiiiiiiiii),
+                "invoke_v": Func(self.store, FuncType([ValType.i32()], []), self.invoke_v),
+                "invoke_vi": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self.invoke_vi),
+                "invoke_vidiii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32(),ValType.i32(),ValType.i32()], []), self.invoke_vidiii),
+                "invoke_vifffi": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.f64(),ValType.f64(),ValType.f64(),ValType.i32()], []), self.invoke_vifffi),
+                "invoke_vifi": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32()], []), self.invoke_vifi),
+                "invoke_vifii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32(),ValType.i32()], []), self.invoke_vifii),
+                "invoke_vii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self.invoke_vii),
+                "invoke_viidi": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32()], []), self.invoke_viidi),
+                "invoke_viidii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32(),ValType.i32()], []), self.invoke_viidii),
+                "invoke_viiff": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.f64()], []), self.invoke_viiff),
+                "invoke_viiffi": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.f64(),ValType.i32()], []), self.invoke_viiffi),
+                "invoke_viifi": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32()], []), self.invoke_viifi),
+                "invoke_viifii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32(),ValType.i32()], []), self.invoke_viifii),
+                "invoke_viii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self.invoke_viii),
+                "invoke_viiif": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64()], []), self.invoke_viiif),
+                "invoke_viiii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self.invoke_viiii),
+                "invoke_viiiii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self.invoke_viiiii),
+                "invoke_viiiiii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self.invoke_viiiiii),
+                "invoke_viiiiiii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self.invoke_viiiiiii),
+                "invoke_viiiiiiifddfii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.f64(),ValType.f64(),ValType.f64(),ValType.i32(),ValType.i32()], []), self.invoke_viiiiiiifddfii),
+                "invoke_viiiiiiiffffii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.f64(),ValType.f64(),ValType.f64(),ValType.i32(),ValType.i32()], []), self.invoke_viiiiiiiffffii),
+                "invoke_viiiiiiifiifii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32(),ValType.i32()], []), self.invoke_viiiiiiifiifii),
+                "invoke_viiiiiiii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self.invoke_viiiiiiii),
+                "invoke_viiiiiiiii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self.invoke_viiiiiiiii),
+                "invoke_viiiiiiiiii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self.invoke_viiiiiiiiii),
+                "_ES_AddEventHandler": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._ES_AddEventHandler),
+                "_ES_Close": Func(self.store, FuncType([ValType.i32()], []), self._ES_Close),
+                "_ES_Create": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._ES_Create),
+                "_ES_IsSupported": Func(self.store, FuncType([], [ValType.i32()]), self._ES_IsSupported),
+                "_ES_Release": Func(self.store, FuncType([ValType.i32()], []), self._ES_Release),
+                "_GetInputFieldSelectionEnd": Func(self.store, FuncType([], [ValType.i32()]), self._GetInputFieldSelectionEnd),
+                "_GetInputFieldSelectionStart": Func(self.store, FuncType([], [ValType.i32()]), self._GetInputFieldSelectionStart),
+                "_GetInputFieldValue": Func(self.store, FuncType([], [ValType.i32()]), self._GetInputFieldValue),
+                "_HideInputField": Func(self.store, FuncType([], []), self._HideInputField),
+                "_IsInputFieldActive": Func(self.store, FuncType([], [ValType.i32()]), self._IsInputFieldActive),
+                "_JS_Cursor_SetImage": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._JS_Cursor_SetImage),
+                "_JS_Cursor_SetShow": Func(self.store, FuncType([ValType.i32()], []), self._JS_Cursor_SetShow),
+                "_JS_Eval_ClearInterval": Func(self.store, FuncType([ValType.i32()], []), self._JS_Eval_ClearInterval),
+                "_JS_Eval_OpenURL": Func(self.store, FuncType([ValType.i32()], []), self._JS_Eval_OpenURL),
+                "_JS_Eval_SetInterval": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._JS_Eval_SetInterval),
+                "_JS_FileSystem_Initialize": Func(self.store, FuncType([], []), self._JS_FileSystem_Initialize),
+                "_JS_FileSystem_Sync": Func(self.store, FuncType([], []), self._JS_FileSystem_Sync),
+                "_JS_Log_Dump": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._JS_Log_Dump),
+                "_JS_Log_StackTrace": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._JS_Log_StackTrace),
+                "_JS_Sound_Create_Channel": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._JS_Sound_Create_Channel),
+                "_JS_Sound_GetLength": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._JS_Sound_GetLength),
+                "_JS_Sound_GetLoadState": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._JS_Sound_GetLoadState),
+                "_JS_Sound_Init": Func(self.store, FuncType([], []), self._JS_Sound_Init),
+                "_JS_Sound_Load": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._JS_Sound_Load),
+                "_JS_Sound_Load_PCM": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._JS_Sound_Load_PCM),
+                "_JS_Sound_Play": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.f64(),ValType.f64()], []), self._JS_Sound_Play),
+                "_JS_Sound_ReleaseInstance": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._JS_Sound_ReleaseInstance),
+                "_JS_Sound_ResumeIfNeeded": Func(self.store, FuncType([], []), self._JS_Sound_ResumeIfNeeded),
+                "_JS_Sound_Set3D": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._JS_Sound_Set3D),
+                "_JS_Sound_SetListenerOrientation": Func(self.store, FuncType([ValType.f64(),ValType.f64(),ValType.f64(),ValType.f64(),ValType.f64(),ValType.f64()], []), self._JS_Sound_SetListenerOrientation),
+                "_JS_Sound_SetListenerPosition": Func(self.store, FuncType([ValType.f64(),ValType.f64(),ValType.f64()], []), self._JS_Sound_SetListenerPosition),
+                "_JS_Sound_SetLoop": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._JS_Sound_SetLoop),
+                "_JS_Sound_SetLoopPoints": Func(self.store, FuncType([ValType.i32(),ValType.f64(),ValType.f64()], []), self._JS_Sound_SetLoopPoints),
+                "_JS_Sound_SetPaused": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._JS_Sound_SetPaused),
+                "_JS_Sound_SetPitch": Func(self.store, FuncType([ValType.i32(),ValType.f64()], []), self._JS_Sound_SetPitch),
+                "_JS_Sound_SetPosition": Func(self.store, FuncType([ValType.i32(),ValType.f64(),ValType.f64(),ValType.f64()], []), self._JS_Sound_SetPosition),
+                "_JS_Sound_SetVolume": Func(self.store, FuncType([ValType.i32(),ValType.f64()], []), self._JS_Sound_SetVolume),
+                "_JS_Sound_Stop": Func(self.store, FuncType([ValType.i32(),ValType.f64()], []), self._JS_Sound_Stop),
+                "_JS_SystemInfo_GetBrowserName": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._JS_SystemInfo_GetBrowserName),
+                "_JS_SystemInfo_GetBrowserVersionString": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._JS_SystemInfo_GetBrowserVersionString),
+                "_JS_SystemInfo_GetCanvasClientSize": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._JS_SystemInfo_GetCanvasClientSize),
+                "_JS_SystemInfo_GetDocumentURL": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._JS_SystemInfo_GetDocumentURL),
+                "_JS_SystemInfo_GetGPUInfo": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._JS_SystemInfo_GetGPUInfo),
+                "_JS_SystemInfo_GetLanguage": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._JS_SystemInfo_GetLanguage),
+                "_JS_SystemInfo_GetMemory": Func(self.store, FuncType([], [ValType.i32()]), self._JS_SystemInfo_GetMemory),
+                "_JS_SystemInfo_GetOS": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._JS_SystemInfo_GetOS),
+                "_JS_SystemInfo_GetPreferredDevicePixelRatio": Func(self.store, FuncType([], [ValType.f64()]), self._JS_SystemInfo_GetPreferredDevicePixelRatio),
+                "_JS_SystemInfo_GetScreenSize": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._JS_SystemInfo_GetScreenSize),
+                "_JS_SystemInfo_GetStreamingAssetsURL": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._JS_SystemInfo_GetStreamingAssetsURL),
+                "_JS_SystemInfo_HasCursorLock": Func(self.store, FuncType([], [ValType.i32()]), self._JS_SystemInfo_HasCursorLock),
+                "_JS_SystemInfo_HasFullscreen": Func(self.store, FuncType([], [ValType.i32()]), self._JS_SystemInfo_HasFullscreen),
+                "_JS_SystemInfo_HasWebGL": Func(self.store, FuncType([], [ValType.i32()]), self._JS_SystemInfo_HasWebGL),
+                "_JS_SystemInfo_IsMobile": Func(self.store, FuncType([], [ValType.i32()]), self._JS_SystemInfo_IsMobile),
+                "_JS_Video_CanPlayFormat": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._JS_Video_CanPlayFormat),
+                "_JS_Video_Create": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._JS_Video_Create),
+                "_JS_Video_Destroy": Func(self.store, FuncType([ValType.i32()], []), self._JS_Video_Destroy),
+                "_JS_Video_Duration": Func(self.store, FuncType([ValType.i32()], [ValType.f64()]), self._JS_Video_Duration),
+                "_JS_Video_EnableAudioTrack": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._JS_Video_EnableAudioTrack),
+                "_JS_Video_GetAudioLanguageCode": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._JS_Video_GetAudioLanguageCode),
+                "_JS_Video_GetNumAudioTracks": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._JS_Video_GetNumAudioTracks),
+                "_JS_Video_Height": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._JS_Video_Height),
+                "_JS_Video_IsPlaying": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._JS_Video_IsPlaying),
+                "_JS_Video_IsReady": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._JS_Video_IsReady),
+                "_JS_Video_Pause": Func(self.store, FuncType([ValType.i32()], []), self._JS_Video_Pause),
+                "_JS_Video_Play": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._JS_Video_Play),
+                "_JS_Video_Seek": Func(self.store, FuncType([ValType.i32(),ValType.f64()], []), self._JS_Video_Seek),
+                "_JS_Video_SetEndedHandler": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._JS_Video_SetEndedHandler),
+                "_JS_Video_SetErrorHandler": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._JS_Video_SetErrorHandler),
+                "_JS_Video_SetLoop": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._JS_Video_SetLoop),
+                "_JS_Video_SetMute": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._JS_Video_SetMute),
+                "_JS_Video_SetPlaybackRate": Func(self.store, FuncType([ValType.i32(),ValType.f64()], []), self._JS_Video_SetPlaybackRate),
+                "_JS_Video_SetReadyHandler": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._JS_Video_SetReadyHandler),
+                "_JS_Video_SetSeekedOnceHandler": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._JS_Video_SetSeekedOnceHandler),
+                "_JS_Video_SetVolume": Func(self.store, FuncType([ValType.i32(),ValType.f64()], []), self._JS_Video_SetVolume),
+                "_JS_Video_Time": Func(self.store, FuncType([ValType.i32()], [ValType.f64()]), self._JS_Video_Time),
+                "_JS_Video_UpdateToTexture": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._JS_Video_UpdateToTexture),
+                "_JS_Video_Width": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._JS_Video_Width),
+                "_JS_WebCamVideo_CanPlay": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._JS_WebCamVideo_CanPlay),
+                "_JS_WebCamVideo_GetDeviceName": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._JS_WebCamVideo_GetDeviceName),
+                "_JS_WebCamVideo_GetNativeHeight": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._JS_WebCamVideo_GetNativeHeight),
+                "_JS_WebCamVideo_GetNativeWidth": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._JS_WebCamVideo_GetNativeWidth),
+                "_JS_WebCamVideo_GetNumDevices": Func(self.store, FuncType([], [ValType.i32()]), self._JS_WebCamVideo_GetNumDevices),
+                "_JS_WebCamVideo_GrabFrame": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._JS_WebCamVideo_GrabFrame),
+                "_JS_WebCamVideo_Start": Func(self.store, FuncType([ValType.i32()], []), self._JS_WebCamVideo_Start),
+                "_JS_WebCamVideo_Stop": Func(self.store, FuncType([ValType.i32()], []), self._JS_WebCamVideo_Stop),
+                "_JS_WebCam_IsSupported": Func(self.store, FuncType([], [ValType.i32()]), self._JS_WebCam_IsSupported),
+                "_JS_WebRequest_Abort": Func(self.store, FuncType([ValType.i32()], []), self._JS_WebRequest_Abort),
+                "_JS_WebRequest_Create": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._JS_WebRequest_Create),
+                "_JS_WebRequest_GetResponseHeaders": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._JS_WebRequest_GetResponseHeaders),
+                "_JS_WebRequest_Release": Func(self.store, FuncType([ValType.i32()], []), self._JS_WebRequest_Release),
+                "_JS_WebRequest_Send": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._JS_WebRequest_Send),
+                "_JS_WebRequest_SetProgressHandler": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._JS_WebRequest_SetProgressHandler),
+                "_JS_WebRequest_SetRequestHeader": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._JS_WebRequest_SetRequestHeader),
+                "_JS_WebRequest_SetResponseHandler": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._JS_WebRequest_SetResponseHandler),
+                "_JS_WebRequest_SetTimeout": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._JS_WebRequest_SetTimeout),
+                "_NativeCall": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._NativeCall),
+                "_SetInputFieldSelection": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._SetInputFieldSelection),
+                "_ShowInputField": Func(self.store, FuncType([ValType.i32()], []), self._ShowInputField),
+                "_WS_Close": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._WS_Close),
+                "_WS_Create": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._WS_Create),
+                "_WS_GetBufferedAmount": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._WS_GetBufferedAmount),
+                "_WS_GetState": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._WS_GetState),
+                "_WS_Release": Func(self.store, FuncType([ValType.i32()], []), self._WS_Release),
+                "_WS_Send_Binary": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._WS_Send_Binary),
+                "_WS_Send_String": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._WS_Send_String),
+                "_XHR_Abort": Func(self.store, FuncType([ValType.i32()], []), self._XHR_Abort),
+                "_XHR_Create": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._XHR_Create),
+                "_XHR_GetResponseHeaders": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._XHR_GetResponseHeaders),
+                "_XHR_GetStatusLine": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._XHR_GetStatusLine),
+                "_XHR_Release": Func(self.store, FuncType([ValType.i32()], []), self._XHR_Release),
+                "_XHR_Send": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._XHR_Send),
+                "_XHR_SetLoglevel": Func(self.store, FuncType([ValType.i32()], []), self._XHR_SetLoglevel),
+                "_XHR_SetProgressHandler": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._XHR_SetProgressHandler),
+                "_XHR_SetRequestHeader": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._XHR_SetRequestHeader),
+                "_XHR_SetResponseHandler": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._XHR_SetResponseHandler),
+                "_XHR_SetTimeout": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._XHR_SetTimeout),
+                "_buildEnvironment": Func(self.store, FuncType([ValType.i32()], []), self._buildEnvironment),
+                "_cxa_allocate_exception": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._cxa_allocate_exception),
+                "_cxa_begin_catch": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._cxa_begin_catch),
+                "_cxa_end_catch": Func(self.store, FuncType([], []), self._cxa_end_catch),
+                "_cxa_find_matching_catch_2": Func(self.store, FuncType([], [ValType.i32()]), self._cxa_find_matching_catch_2),
+                "_cxa_find_matching_catch_3": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._cxa_find_matching_catch_3),
+                "_cxa_find_matching_catch_4": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._cxa_find_matching_catch_4),
+                "_cxa_free_exception": Func(self.store, FuncType([ValType.i32()], []), self._cxa_free_exception),
+                "_cxa_pure_virtual": Func(self.store, FuncType([], []), self._cxa_pure_virtual),
+                "_cxa_rethrow": Func(self.store, FuncType([], []), self._cxa_rethrow),
+                "_cxa_throw": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._cxa_throw),
+                "_lock": Func(self.store, FuncType([ValType.i32()], []), self._lock),
+                "_map_file": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._map_file),
+                "_resumeException": Func(self.store, FuncType([ValType.i32()], []), self._resumeException),
+                "_setErrNo": Func(self.store, FuncType([ValType.i32()], []), self._setErrNo),
+                "_syscall10": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall10),
+                "_syscall102": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall102),
+                "_syscall122": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall122),
+                "_syscall140": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall140),
+                "_syscall142": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall142),
+                "_syscall145": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall145),
+                "_syscall146": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall146),
+                "_syscall15": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall15),
+                "_syscall168": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall168),
+                "_syscall183": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall183),
+                "_syscall192": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall192),
+                "_syscall193": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall193),
+                "_syscall194": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall194),
+                "_syscall195": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall195),
+                "_syscall196": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall196),
+                "_syscall197": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall197),
+                "_syscall199": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall199),
+                "_syscall220": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall220),
+                "_syscall221": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall221),
+                "_syscall268": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall268),
+                "_syscall3": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall3),
+                "_syscall33": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall33),
+                "_syscall38": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall38),
+                "_syscall39": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall39),
+                "_syscall4": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall4),
+                "_syscall40": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall40),
+                "_syscall42": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall42),
+                "_syscall5": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall5),
+                "_syscall54": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall54),
+                "_syscall6": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall6),
+                "_syscall63": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall63),
+                "_syscall77": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall77),
+                "_syscall85": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall85),
+                "_syscall91": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._syscall91),
+                "_unlock": Func(self.store, FuncType([ValType.i32()], []), self._unlock),
+                "_abort": Func(self.store, FuncType([], []), self._abort),
+                "_atexit": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._atexit),
+                "_clock": Func(self.store, FuncType([], [ValType.i32()]), self._clock),
+                "_clock_getres": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._clock_getres),
+                "_clock_gettime": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._clock_gettime),
+                "_difftime": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.f64()]), self._difftime),
+                "_dlclose": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._dlclose),
+                "_dlopen": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._dlopen),
+                "_dlsym": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._dlsym),
+                "_emscripten_asm_const_i": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._emscripten_asm_const_i),
+                "_emscripten_asm_const_sync_on_main_thread_i": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._emscripten_asm_const_sync_on_main_thread_i),
+                "_emscripten_cancel_main_loop": Func(self.store, FuncType([], []), self._emscripten_cancel_main_loop),
+                "_emscripten_exit_fullscreen": Func(self.store, FuncType([], [ValType.i32()]), self._emscripten_exit_fullscreen),
+                "_emscripten_exit_pointerlock": Func(self.store, FuncType([], [ValType.i32()]), self._emscripten_exit_pointerlock),
+                "_emscripten_get_canvas_element_size": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_get_canvas_element_size),
+                "_emscripten_get_fullscreen_status": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._emscripten_get_fullscreen_status),
+                "_emscripten_get_gamepad_status": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_get_gamepad_status),
+                "_emscripten_get_main_loop_timing": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._emscripten_get_main_loop_timing),
+                "_emscripten_get_now": Func(self.store, FuncType([], [ValType.f64()]), self._emscripten_get_now),
+                "_emscripten_get_num_gamepads": Func(self.store, FuncType([], [ValType.i32()]), self._emscripten_get_num_gamepads),
+                "_emscripten_has_threading_support": Func(self.store, FuncType([], [ValType.i32()]), self._emscripten_has_threading_support),
+                "_emscripten_html5_remove_all_event_listeners": Func(self.store, FuncType([], []), self._emscripten_html5_remove_all_event_listeners),
+                "_emscripten_is_webgl_context_lost": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._emscripten_is_webgl_context_lost),
+                "_emscripten_log": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._emscripten_log),
+                "_emscripten_longjmp": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._emscripten_longjmp),
+                "_emscripten_memcpy_big": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_memcpy_big),
+                "_emscripten_num_logical_cores": Func(self.store, FuncType([], [ValType.i32()]), self._emscripten_num_logical_cores),
+                "_emscripten_request_fullscreen": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_request_fullscreen),
+                "_emscripten_request_pointerlock": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_request_pointerlock),
+                "_emscripten_set_blur_callback_on_thread": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_set_blur_callback_on_thread),
+                "_emscripten_set_canvas_element_size": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_set_canvas_element_size),
+                "_emscripten_set_dblclick_callback_on_thread": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_set_dblclick_callback_on_thread),
+                "_emscripten_set_devicemotion_callback_on_thread": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_set_devicemotion_callback_on_thread),
+                "_emscripten_set_deviceorientation_callback_on_thread": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_set_deviceorientation_callback_on_thread),
+                "_emscripten_set_focus_callback_on_thread": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_set_focus_callback_on_thread),
+                "_emscripten_set_fullscreenchange_callback_on_thread": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_set_fullscreenchange_callback_on_thread),
+                "_emscripten_set_gamepadconnected_callback_on_thread": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_set_gamepadconnected_callback_on_thread),
+                "_emscripten_set_gamepaddisconnected_callback_on_thread": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_set_gamepaddisconnected_callback_on_thread),
+                "_emscripten_set_keydown_callback_on_thread": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_set_keydown_callback_on_thread),
+                "_emscripten_set_keypress_callback_on_thread": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_set_keypress_callback_on_thread),
+                "_emscripten_set_keyup_callback_on_thread": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_set_keyup_callback_on_thread),
+                "_emscripten_set_main_loop": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._emscripten_set_main_loop),
+                "_emscripten_set_main_loop_timing": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_set_main_loop_timing),
+                "_emscripten_set_mousedown_callback_on_thread": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_set_mousedown_callback_on_thread),
+                "_emscripten_set_mousemove_callback_on_thread": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_set_mousemove_callback_on_thread),
+                "_emscripten_set_mouseup_callback_on_thread": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_set_mouseup_callback_on_thread),
+                "_emscripten_set_touchcancel_callback_on_thread": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_set_touchcancel_callback_on_thread),
+                "_emscripten_set_touchend_callback_on_thread": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_set_touchend_callback_on_thread),
+                "_emscripten_set_touchmove_callback_on_thread": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_set_touchmove_callback_on_thread),
+                "_emscripten_set_touchstart_callback_on_thread": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_set_touchstart_callback_on_thread),
+                "_emscripten_set_wheel_callback_on_thread": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_set_wheel_callback_on_thread),
+                "_emscripten_webgl_create_context": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_webgl_create_context),
+                "_emscripten_webgl_destroy_context": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._emscripten_webgl_destroy_context),
+                "_emscripten_webgl_enable_extension": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._emscripten_webgl_enable_extension),
+                "_emscripten_webgl_get_current_context": Func(self.store, FuncType([], [ValType.i32()]), self._emscripten_webgl_get_current_context),
+                "_emscripten_webgl_init_context_attributes": Func(self.store, FuncType([ValType.i32()], []), self._emscripten_webgl_init_context_attributes),
+                "_emscripten_webgl_make_context_current": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._emscripten_webgl_make_context_current),
+                "_exit": Func(self.store, FuncType([ValType.i32()], []), self._exit),
+                "_flock": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._flock),
+                "_getaddrinfo": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._getaddrinfo),
+                "_getenv": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._getenv),
+                "_gethostbyaddr": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._gethostbyaddr),
+                "_gethostbyname": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._gethostbyname),
+                "_getnameinfo": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._getnameinfo),
+                "_getpagesize": Func(self.store, FuncType([], [ValType.i32()]), self._getpagesize),
+                "_getpwuid": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._getpwuid),
+                "_gettimeofday": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._gettimeofday),
+                "_glActiveTexture": Func(self.store, FuncType([ValType.i32()], []), self._glActiveTexture),
+                "_glAttachShader": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glAttachShader),
+                "_glBeginQuery": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glBeginQuery),
+                "_glBeginTransformFeedback": Func(self.store, FuncType([ValType.i32()], []), self._glBeginTransformFeedback),
+                "_glBindAttribLocation": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glBindAttribLocation),
+                "_glBindBuffer": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glBindBuffer),
+                "_glBindBufferBase": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glBindBufferBase),
+                "_glBindBufferRange": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glBindBufferRange),
+                "_glBindFramebuffer": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glBindFramebuffer),
+                "_glBindRenderbuffer": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glBindRenderbuffer),
+                "_glBindSampler": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glBindSampler),
+                "_glBindTexture": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glBindTexture),
+                "_glBindTransformFeedback": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glBindTransformFeedback),
+                "_glBindVertexArray": Func(self.store, FuncType([ValType.i32()], []), self._glBindVertexArray),
+                "_glBlendEquation": Func(self.store, FuncType([ValType.i32()], []), self._glBlendEquation),
+                "_glBlendEquationSeparate": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glBlendEquationSeparate),
+                "_glBlendFuncSeparate": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glBlendFuncSeparate),
+                "_glBlitFramebuffer": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glBlitFramebuffer),
+                "_glBufferData": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glBufferData),
+                "_glBufferSubData": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glBufferSubData),
+                "_glCheckFramebufferStatus": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._glCheckFramebufferStatus),
+                "_glClear": Func(self.store, FuncType([ValType.i32()], []), self._glClear),
+                "_glClearBufferfi": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32()], []), self._glClearBufferfi),
+                "_glClearBufferfv": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glClearBufferfv),
+                "_glClearBufferuiv": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glClearBufferuiv),
+                "_glClearColor": Func(self.store, FuncType([ValType.f64(),ValType.f64(),ValType.f64(),ValType.f64()], []), self._glClearColor),
+                "_glClearDepthf": Func(self.store, FuncType([ValType.f64()], []), self._glClearDepthf),
+                "_glClearStencil": Func(self.store, FuncType([ValType.i32()], []), self._glClearStencil),
+                "_glColorMask": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glColorMask),
+                "_glCompileShader": Func(self.store, FuncType([ValType.i32()], []), self._glCompileShader),
+                "_glCompressedTexImage2D": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glCompressedTexImage2D),
+                "_glCompressedTexSubImage2D": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glCompressedTexSubImage2D),
+                "_glCompressedTexSubImage3D": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glCompressedTexSubImage3D),
+                "_glCopyBufferSubData": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glCopyBufferSubData),
+                "_glCopyTexImage2D": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glCopyTexImage2D),
+                "_glCopyTexSubImage2D": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glCopyTexSubImage2D),
+                "_glCreateProgram": Func(self.store, FuncType([], [ValType.i32()]), self._glCreateProgram),
+                "_glCreateShader": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._glCreateShader),
+                "_glCullFace": Func(self.store, FuncType([ValType.i32()], []), self._glCullFace),
+                "_glDeleteBuffers": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glDeleteBuffers),
+                "_glDeleteFramebuffers": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glDeleteFramebuffers),
+                "_glDeleteProgram": Func(self.store, FuncType([ValType.i32()], []), self._glDeleteProgram),
+                "_glDeleteQueries": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glDeleteQueries),
+                "_glDeleteRenderbuffers": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glDeleteRenderbuffers),
+                "_glDeleteSamplers": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glDeleteSamplers),
+                "_glDeleteShader": Func(self.store, FuncType([ValType.i32()], []), self._glDeleteShader),
+                "_glDeleteSync": Func(self.store, FuncType([ValType.i32()], []), self._glDeleteSync),
+                "_glDeleteTextures": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glDeleteTextures),
+                "_glDeleteTransformFeedbacks": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glDeleteTransformFeedbacks),
+                "_glDeleteVertexArrays": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glDeleteVertexArrays),
+                "_glDepthFunc": Func(self.store, FuncType([ValType.i32()], []), self._glDepthFunc),
+                "_glDepthMask": Func(self.store, FuncType([ValType.i32()], []), self._glDepthMask),
+                "_glDetachShader": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glDetachShader),
+                "_glDisable": Func(self.store, FuncType([ValType.i32()], []), self._glDisable),
+                "_glDisableVertexAttribArray": Func(self.store, FuncType([ValType.i32()], []), self._glDisableVertexAttribArray),
+                "_glDrawArrays": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glDrawArrays),
+                "_glDrawArraysInstanced": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glDrawArraysInstanced),
+                "_glDrawBuffers": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glDrawBuffers),
+                "_glDrawElements": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glDrawElements),
+                "_glDrawElementsInstanced": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glDrawElementsInstanced),
+                "_glEnable": Func(self.store, FuncType([ValType.i32()], []), self._glEnable),
+                "_glEnableVertexAttribArray": Func(self.store, FuncType([ValType.i32()], []), self._glEnableVertexAttribArray),
+                "_glEndQuery": Func(self.store, FuncType([ValType.i32()], []), self._glEndQuery),
+                "_glEndTransformFeedback": Func(self.store, FuncType([], []), self._glEndTransformFeedback),
+                "_glFenceSync": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._glFenceSync),
+                "_glFinish": Func(self.store, FuncType([], []), self._glFinish),
+                "_glFlush": Func(self.store, FuncType([], []), self._glFlush),
+                "_glFlushMappedBufferRange": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glFlushMappedBufferRange),
+                "_glFramebufferRenderbuffer": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glFramebufferRenderbuffer),
+                "_glFramebufferTexture2D": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glFramebufferTexture2D),
+                "_glFramebufferTextureLayer": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glFramebufferTextureLayer),
+                "_glFrontFace": Func(self.store, FuncType([ValType.i32()], []), self._glFrontFace),
+                "_glGenBuffers": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glGenBuffers),
+                "_glGenFramebuffers": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glGenFramebuffers),
+                "_glGenQueries": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glGenQueries),
+                "_glGenRenderbuffers": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glGenRenderbuffers),
+                "_glGenSamplers": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glGenSamplers),
+                "_glGenTextures": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glGenTextures),
+                "_glGenTransformFeedbacks": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glGenTransformFeedbacks),
+                "_glGenVertexArrays": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glGenVertexArrays),
+                "_glGenerateMipmap": Func(self.store, FuncType([ValType.i32()], []), self._glGenerateMipmap),
+                "_glGetActiveAttrib": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glGetActiveAttrib),
+                "_glGetActiveUniform": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glGetActiveUniform),
+                "_glGetActiveUniformBlockName": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glGetActiveUniformBlockName),
+                "_glGetActiveUniformBlockiv": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glGetActiveUniformBlockiv),
+                "_glGetActiveUniformsiv": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glGetActiveUniformsiv),
+                "_glGetAttribLocation": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._glGetAttribLocation),
+                "_glGetError": Func(self.store, FuncType([], [ValType.i32()]), self._glGetError),
+                "_glGetFramebufferAttachmentParameteriv": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glGetFramebufferAttachmentParameteriv),
+                "_glGetIntegeri_v": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glGetIntegeri_v),
+                "_glGetIntegerv": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glGetIntegerv),
+                "_glGetInternalformativ": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glGetInternalformativ),
+                "_glGetProgramBinary": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glGetProgramBinary),
+                "_glGetProgramInfoLog": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glGetProgramInfoLog),
+                "_glGetProgramiv": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glGetProgramiv),
+                "_glGetRenderbufferParameteriv": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glGetRenderbufferParameteriv),
+                "_glGetShaderInfoLog": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glGetShaderInfoLog),
+                "_glGetShaderPrecisionFormat": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glGetShaderPrecisionFormat),
+                "_glGetShaderSource": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glGetShaderSource),
+                "_glGetShaderiv": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glGetShaderiv),
+                "_glGetString": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._glGetString),
+                "_glGetStringi": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._glGetStringi),
+                "_glGetTexParameteriv": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glGetTexParameteriv),
+                "_glGetUniformBlockIndex": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._glGetUniformBlockIndex),
+                "_glGetUniformIndices": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glGetUniformIndices),
+                "_glGetUniformLocation": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._glGetUniformLocation),
+                "_glGetUniformiv": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glGetUniformiv),
+                "_glGetVertexAttribiv": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glGetVertexAttribiv),
+                "_glInvalidateFramebuffer": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glInvalidateFramebuffer),
+                "_glIsEnabled": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._glIsEnabled),
+                "_glIsVertexArray": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._glIsVertexArray),
+                "_glLinkProgram": Func(self.store, FuncType([ValType.i32()], []), self._glLinkProgram),
+                "_glMapBufferRange": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._glMapBufferRange),
+                "_glPixelStorei": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glPixelStorei),
+                "_glPolygonOffset": Func(self.store, FuncType([ValType.f64(),ValType.f64()], []), self._glPolygonOffset),
+                "_glProgramBinary": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glProgramBinary),
+                "_glProgramParameteri": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glProgramParameteri),
+                "_glReadBuffer": Func(self.store, FuncType([ValType.i32()], []), self._glReadBuffer),
+                "_glReadPixels": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glReadPixels),
+                "_glRenderbufferStorage": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glRenderbufferStorage),
+                "_glRenderbufferStorageMultisample": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glRenderbufferStorageMultisample),
+                "_glSamplerParameteri": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glSamplerParameteri),
+                "_glScissor": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glScissor),
+                "_glShaderSource": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glShaderSource),
+                "_glStencilFuncSeparate": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glStencilFuncSeparate),
+                "_glStencilMask": Func(self.store, FuncType([ValType.i32()], []), self._glStencilMask),
+                "_glStencilOpSeparate": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glStencilOpSeparate),
+                "_glTexImage2D": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glTexImage2D),
+                "_glTexImage3D": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glTexImage3D),
+                "_glTexParameterf": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.f64()], []), self._glTexParameterf),
+                "_glTexParameteri": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glTexParameteri),
+                "_glTexParameteriv": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glTexParameteriv),
+                "_glTexStorage2D": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glTexStorage2D),
+                "_glTexStorage3D": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glTexStorage3D),
+                "_glTexSubImage2D": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glTexSubImage2D),
+                "_glTexSubImage3D": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glTexSubImage3D),
+                "_glTransformFeedbackVaryings": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glTransformFeedbackVaryings),
+                "_glUniform1fv": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glUniform1fv),
+                "_glUniform1i": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glUniform1i),
+                "_glUniform1iv": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glUniform1iv),
+                "_glUniform1uiv": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glUniform1uiv),
+                "_glUniform2fv": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glUniform2fv),
+                "_glUniform2iv": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glUniform2iv),
+                "_glUniform2uiv": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glUniform2uiv),
+                "_glUniform3fv": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glUniform3fv),
+                "_glUniform3iv": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glUniform3iv),
+                "_glUniform3uiv": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glUniform3uiv),
+                "_glUniform4fv": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glUniform4fv),
+                "_glUniform4iv": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glUniform4iv),
+                "_glUniform4uiv": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glUniform4uiv),
+                "_glUniformBlockBinding": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self._glUniformBlockBinding),
+                "_glUniformMatrix3fv": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glUniformMatrix3fv),
+                "_glUniformMatrix4fv": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glUniformMatrix4fv),
+                "_glUnmapBuffer": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._glUnmapBuffer),
+                "_glUseProgram": Func(self.store, FuncType([ValType.i32()], []), self._glUseProgram),
+                "_glValidateProgram": Func(self.store, FuncType([ValType.i32()], []), self._glValidateProgram),
+                "_glVertexAttrib4f": Func(self.store, FuncType([ValType.i32(),ValType.f64(),ValType.f64(),ValType.f64(),ValType.f64()], []), self._glVertexAttrib4f),
+                "_glVertexAttrib4fv": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._glVertexAttrib4fv),
+                "_glVertexAttribIPointer": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glVertexAttribIPointer),
+                "_glVertexAttribPointer": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glVertexAttribPointer),
+                "_glViewport": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self._glViewport),
+                "_gmtime": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._gmtime),
+                "_inet_addr": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._inet_addr),
+                "_llvm_eh_typeid_for": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._llvm_eh_typeid_for),
+                "_llvm_exp2_f32": Func(self.store, FuncType([ValType.f64()], [ValType.f64()]), self._llvm_exp2_f32),
+                "_llvm_log10_f32": Func(self.store, FuncType([ValType.f64()], [ValType.f64()]), self._llvm_log10_f32),
+                "_llvm_log10_f64": Func(self.store, FuncType([ValType.f64()], [ValType.f64()]), self._llvm_log10_f64),
+                "_llvm_log2_f32": Func(self.store, FuncType([ValType.f64()], [ValType.f64()]), self._llvm_log2_f32),
+                "_llvm_trap": Func(self.store, FuncType([], []), self._llvm_trap),
+                "_llvm_trunc_f32": Func(self.store, FuncType([ValType.f64()], [ValType.f64()]), self._llvm_trunc_f32),
+                "_localtime": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._localtime),
+                "_longjmp": Func(self.store, FuncType([ValType.i32(),ValType.i32()], []), self._longjmp),
+                "_mktime": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._mktime),
+                "_pthread_cond_destroy": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._pthread_cond_destroy),
+                "_pthread_cond_init": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._pthread_cond_init),
+                "_pthread_cond_timedwait": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._pthread_cond_timedwait),
+                "_pthread_cond_wait": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._pthread_cond_wait),
+                "_pthread_getspecific": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._pthread_getspecific),
+                "_pthread_key_create": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._pthread_key_create),
+                "_pthread_key_delete": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._pthread_key_delete),
+                "_pthread_mutex_destroy": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._pthread_mutex_destroy),
+                "_pthread_mutex_init": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._pthread_mutex_init),
+                "_pthread_mutexattr_destroy": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._pthread_mutexattr_destroy),
+                "_pthread_mutexattr_init": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._pthread_mutexattr_init),
+                "_pthread_mutexattr_setprotocol": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._pthread_mutexattr_setprotocol),
+                "_pthread_mutexattr_settype": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._pthread_mutexattr_settype),
+                "_pthread_once": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._pthread_once),
+                "_pthread_setspecific": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._pthread_setspecific),
+                "_sched_yield": Func(self.store, FuncType([], [ValType.i32()]), self._sched_yield),
+                "_setenv": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._setenv),
+                "_sigaction": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._sigaction),
+                "_sigemptyset": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._sigemptyset),
+                "_strftime": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._strftime),
+                "_sysconf": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._sysconf),
+                "_time": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._time),
+                "_unsetenv": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self._unsetenv),
+                "_utime": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self._utime),
+                "f64_rem": Func(self.store, FuncType([ValType.f64(),ValType.f64()], [ValType.f64()]), self.f64_rem),
+                "invoke_iiiiij": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_iiiiij),
+                "invoke_iiiijii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_iiiijii),
+                "invoke_iiiijjii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_iiiijjii),
+                "invoke_iiiji": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_iiiji),
+                "invoke_iiijiii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_iiijiii),
+                "invoke_iij": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_iij),
+                "invoke_iiji": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_iiji),
+                "invoke_iijii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_iijii),
+                "invoke_ijii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_ijii),
+                "invoke_j": Func(self.store, FuncType([ValType.i32()], [ValType.i32()]), self.invoke_j),
+                "invoke_jdi": Func(self.store, FuncType([ValType.i32(),ValType.f64(),ValType.i32()], [ValType.i32()]), self.invoke_jdi),
+                "invoke_ji": Func(self.store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_ji),
+                "invoke_jii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_jii),
+                "invoke_jiii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_jiii),
+                "invoke_jiiii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_jiiii),
+                "invoke_jiiiii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_jiiiii),
+                "invoke_jiiiiiiiiii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_jiiiiiiiiii),
+                "invoke_jiiij": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_jiiij),
+                "invoke_jiiji": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_jiiji),
+                "invoke_jiji": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_jiji),
+                "invoke_jijii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_jijii),
+                "invoke_jijiii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_jijiii),
+                "invoke_jijj": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_jijj),
+                "invoke_jji": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self.invoke_jji),
+                "invoke_viiiiiiifjjfii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32(),ValType.i32()], []), self.invoke_viiiiiiifjjfii),
+                "invoke_viiiijiiii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self.invoke_viiiijiiii),
+                "invoke_viiij": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self.invoke_viiij),
+                "invoke_viiiji": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self.invoke_viiiji),
+                "invoke_viij": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self.invoke_viij),
+                "invoke_viiji": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self.invoke_viiji),
+                "invoke_viijji": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self.invoke_viijji),
+                "invoke_viji": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self.invoke_viji),
+                "invoke_vijii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self.invoke_vijii),
+                "_atomic_fetch_add_8": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._atomic_fetch_add_8),
+                "_glClientWaitSync": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._glClientWaitSync),
+        }}
 
-def UTF8ArrayToString():
-    pass
+    def export_wasm_func(self):
+        self.__growWasmMemory = partial(self.instance.exports(self.store)["__growWasmMemory"], self.store)
+        self.stackAlloc = partial(self.instance.exports(self.store)["stackAlloc"], self.store)
+        self.stackSave = partial(self.instance.exports(self.store)["stackSave"], self.store)
+        self.stackRestore = partial(self.instance.exports(self.store)["stackRestore"], self.store)
+        self.establishStackSpace = partial(self.instance.exports(self.store)["establishStackSpace"], self.store)
+        self.setThrew = partial(self.instance.exports(self.store)["setThrew"], self.store)
+        self.setTempRet0 = partial(self.instance.exports(self.store)["setTempRet0"], self.store)
+        self.getTempRet0 = partial(self.instance.exports(self.store)["getTempRet0"], self.store)
+        self.__GLOBAL__sub_I_AIScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_AIScriptingClasses_cpp"], self.store)
+        self.___cxx_global_var_init = partial(self.instance.exports(self.store)["___cxx_global_var_init"], self.store)
+        self._pthread_mutex_unlock = partial(self.instance.exports(self.store)["_pthread_mutex_unlock"], self.store)
+        self.runPostSets = partial(self.instance.exports(self.store)["runPostSets"], self.store)
+        self.__GLOBAL__sub_I_AccessibilityScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_AccessibilityScriptingClasses_cpp"], self.store)
+        self.__GLOBAL__sub_I_AndroidJNIScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_AndroidJNIScriptingClasses_cpp"], self.store)
+        self.__GLOBAL__sub_I_AnimationScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_AnimationScriptingClasses_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_Animation_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_Animation_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_Animation_3_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_Animation_3_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_Animation_6_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_Animation_6_cpp"], self.store)
+        self.__GLOBAL__sub_I_Avatar_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Avatar_cpp"], self.store)
+        self.__GLOBAL__sub_I_ConstraintManager_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_ConstraintManager_cpp"], self.store)
+        self.__GLOBAL__sub_I_AnimationClip_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_AnimationClip_cpp"], self.store)
+        self.__GLOBAL__sub_I_AssetBundleScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_AssetBundleScriptingClasses_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_AssetBundle_Public_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_AssetBundle_Public_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_AudioScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_AudioScriptingClasses_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Video_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Video_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_Audio_Public_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_Audio_Public_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_Audio_Public_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_Audio_Public_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_Audio_Public_3_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_Audio_Public_3_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_Audio_Public_ScriptBindings_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_Audio_Public_ScriptBindings_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_Audio_Public_sound_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_Audio_Public_sound_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_ClothScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_ClothScriptingClasses_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_Cloth_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_Cloth_0_cpp"], self.store)
+        self.___cxx_global_var_init_18 = partial(self.instance.exports(self.store)["___cxx_global_var_init_18"], self.store)
+        self.__GLOBAL__sub_I_nvcloth_src_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_nvcloth_src_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_nvcloth_src_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_nvcloth_src_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_SwInterCollision_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_SwInterCollision_cpp"], self.store)
+        self.__GLOBAL__sub_I_SwSolverKernel_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_SwSolverKernel_cpp"], self.store)
+        self.__GLOBAL__sub_I_artifacts_WebGL_codegenerator_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_artifacts_WebGL_codegenerator_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_GfxDevice_opengles_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_GfxDevice_opengles_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_VirtualFileSystem_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_VirtualFileSystem_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Input_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Input_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_GfxDeviceNull_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_GfxDeviceNull_cpp"], self.store)
+        self.__GLOBAL__sub_I_External_ProphecySDK_BlitOperations_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_External_ProphecySDK_BlitOperations_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_2D_Renderer_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_2D_Renderer_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_2D_Sorting_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_2D_Sorting_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_2D_SpriteAtlas_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_2D_SpriteAtlas_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Allocator_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Allocator_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Allocator_2_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Allocator_2_cpp"], self.store)
+        self.___cxx_global_var_init_7 = partial(self.instance.exports(self.store)["___cxx_global_var_init_7"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Application_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Application_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_BaseClasses_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_BaseClasses_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_BaseClasses_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_BaseClasses_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_BaseClasses_2_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_BaseClasses_2_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_BaseClasses_3_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_BaseClasses_3_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Burst_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Burst_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Camera_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Camera_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Camera_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Camera_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Camera_2_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Camera_2_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Camera_3_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Camera_3_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Camera_4_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Camera_4_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Camera_5_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Camera_5_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Camera_6_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Camera_6_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Camera_7_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Camera_7_cpp"], self.store)
+        self.__GLOBAL__sub_I_Shadows_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Shadows_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Camera_Culling_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Camera_Culling_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_GUITexture_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_GUITexture_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Camera_RenderLoops_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Camera_RenderLoops_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Camera_RenderLoops_2_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Camera_RenderLoops_2_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Containers_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Containers_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Core_Callbacks_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Core_Callbacks_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_File_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_File_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Geometry_2_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Geometry_2_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Graphics_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Graphics_0_cpp"], self.store)
+        self.___cxx_global_var_init_98 = partial(self.instance.exports(self.store)["___cxx_global_var_init_98"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Graphics_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Graphics_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Graphics_2_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Graphics_2_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Graphics_4_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Graphics_4_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Graphics_5_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Graphics_5_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Graphics_6_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Graphics_6_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Graphics_8_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Graphics_8_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Graphics_10_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Graphics_10_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Graphics_11_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Graphics_11_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Graphics_Billboard_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Graphics_Billboard_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Graphics_LOD_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Graphics_LOD_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Graphics_Mesh_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Graphics_Mesh_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Graphics_Mesh_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Graphics_Mesh_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Graphics_Mesh_2_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Graphics_Mesh_2_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Graphics_Mesh_4_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Graphics_Mesh_4_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Graphics_Mesh_5_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Graphics_Mesh_5_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Graphics_ScriptableRenderLoop_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Graphics_ScriptableRenderLoop_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Interfaces_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Interfaces_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Interfaces_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Interfaces_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Interfaces_2_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Interfaces_2_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Jobs_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Jobs_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Jobs_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Jobs_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Jobs_Internal_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Jobs_Internal_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Jobs_ScriptBindings_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Jobs_ScriptBindings_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Math_2_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Math_2_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Math_Random_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Math_Random_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Misc_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Misc_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Misc_2_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Misc_2_cpp"], self.store)
+        self.___cxx_global_var_init_131 = partial(self.instance.exports(self.store)["___cxx_global_var_init_131"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Misc_4_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Misc_4_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Misc_5_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Misc_5_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_PreloadManager_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_PreloadManager_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Profiler_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Profiler_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Profiler_2_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Profiler_2_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Profiler_ScriptBindings_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Profiler_ScriptBindings_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_SceneManager_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_SceneManager_0_cpp"], self.store)
+        self.___cxx_global_var_init_8100 = partial(self.instance.exports(self.store)["___cxx_global_var_init_8100"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Shaders_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Shaders_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Shaders_3_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Shaders_3_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Shaders_4_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Shaders_4_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Shaders_ShaderImpl_2_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Shaders_ShaderImpl_2_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Transform_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Transform_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Transform_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Transform_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Utilities_2_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Utilities_2_cpp"], self.store)
+        self.___cxx_global_var_init_2_9504 = partial(self.instance.exports(self.store)["___cxx_global_var_init_2_9504"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Utilities_5_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Utilities_5_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Utilities_6_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Utilities_6_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Utilities_7_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Utilities_7_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Utilities_9_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Utilities_9_cpp"], self.store)
+        self.__GLOBAL__sub_I_AssetBundleFileSystem_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_AssetBundleFileSystem_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Modules_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Modules_0_cpp"], self.store)
+        self.___cxx_global_var_init_13 = partial(self.instance.exports(self.store)["___cxx_global_var_init_13"], self.store)
+        self.___cxx_global_var_init_14 = partial(self.instance.exports(self.store)["___cxx_global_var_init_14"], self.store)
+        self.___cxx_global_var_init_15 = partial(self.instance.exports(self.store)["___cxx_global_var_init_15"], self.store)
+        self.__GLOBAL__sub_I_Modules_Profiler_Public_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_Profiler_Public_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_Profiler_Runtime_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_Profiler_Runtime_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_UnsafeUtility_bindings_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_UnsafeUtility_bindings_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_GfxDevice_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_GfxDevice_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_GfxDevice_2_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_GfxDevice_2_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_GfxDevice_3_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_GfxDevice_3_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_GfxDevice_4_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_GfxDevice_4_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_GfxDevice_5_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_GfxDevice_5_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_PluginInterface_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_PluginInterface_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Director_Core_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Director_Core_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_ScriptingBackend_Il2Cpp_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_ScriptingBackend_Il2Cpp_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Scripting_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Scripting_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Scripting_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Scripting_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Scripting_2_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Scripting_2_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Scripting_3_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Scripting_3_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Mono_2_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Mono_2_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Mono_SerializationBackend_DirectMemoryAccess_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Mono_SerializationBackend_DirectMemoryAccess_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Mono_SerializationBackend_DirectMemoryAccess_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Mono_SerializationBackend_DirectMemoryAccess_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_TemplateInstantiations_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_TemplateInstantiations_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Scripting_APIUpdating_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Scripting_APIUpdating_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Serialize_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Serialize_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Serialize_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Serialize_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Serialize_2_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Serialize_2_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Serialize_TransferFunctions_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Serialize_TransferFunctions_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Runtime_Serialize_TransferFunctions_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Runtime_Serialize_TransferFunctions_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_PlatformDependent_WebGL_Source_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_PlatformDependent_WebGL_Source_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_PlatformDependent_WebGL_Source_2_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_PlatformDependent_WebGL_Source_2_cpp"], self.store)
+        self.__GLOBAL__sub_I_LogAssert_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_LogAssert_cpp"], self.store)
+        self.__GLOBAL__sub_I_Shader_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Shader_cpp"], self.store)
+        self.__GLOBAL__sub_I_Transform_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Transform_cpp"], self.store)
+        self.__GLOBAL__sub_I_PlatformDependent_WebGL_External_baselib_builds_Source_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_PlatformDependent_WebGL_External_baselib_builds_Source_0_cpp"], self.store)
+        self._SendMessage = partial(self.instance.exports(self.store)["_SendMessage"], self.store)
+        self._SendMessageString = partial(self.instance.exports(self.store)["_SendMessageString"], self.store)
+        self._SetFullscreen = partial(self.instance.exports(self.store)["_SetFullscreen"], self.store)
+        self._main = partial(self.instance.exports(self.store)["_main"], self.store)
+        self.__GLOBAL__sub_I_Modules_DSPGraph_Public_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_DSPGraph_Public_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_DirectorScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_DirectorScriptingClasses_cpp"], self.store)
+        self.__GLOBAL__sub_I_GridScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_GridScriptingClasses_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_Grid_Public_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_Grid_Public_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_IMGUIScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_IMGUIScriptingClasses_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_IMGUI_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_IMGUI_0_cpp"], self.store)
+        self.___cxx_global_var_init_22 = partial(self.instance.exports(self.store)["___cxx_global_var_init_22"], self.store)
+        self.__GLOBAL__sub_I_Modules_IMGUI_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_IMGUI_1_cpp"], self.store)
+        self.___cxx_global_var_init_3893 = partial(self.instance.exports(self.store)["___cxx_global_var_init_3893"], self.store)
+        self.__GLOBAL__sub_I_InputLegacyScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_InputLegacyScriptingClasses_cpp"], self.store)
+        self.__GLOBAL__sub_I_InputScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_InputScriptingClasses_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_Input_Private_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_Input_Private_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_ParticleSystemScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_ParticleSystemScriptingClasses_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_ParticleSystem_Modules_3_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_ParticleSystem_Modules_3_cpp"], self.store)
+        self.__GLOBAL__sub_I_ParticleSystemRenderer_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_ParticleSystemRenderer_cpp"], self.store)
+        self.__GLOBAL__sub_I_ShapeModule_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_ShapeModule_cpp"], self.store)
+        self.__GLOBAL__sub_I_Physics2DScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Physics2DScriptingClasses_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_Physics2D_Public_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_Physics2D_Public_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_Physics2D_Public_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_Physics2D_Public_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_PhysicsScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_PhysicsScriptingClasses_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_Physics_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_Physics_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_Physics_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_Physics_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_PhysicsQuery_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_PhysicsQuery_cpp"], self.store)
+        self.__GLOBAL__sub_I_SubsystemsScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_SubsystemsScriptingClasses_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_Subsystems_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_Subsystems_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_TerrainScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_TerrainScriptingClasses_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_Terrain_Public_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_Terrain_Public_0_cpp"], self.store)
+        self.___cxx_global_var_init_69 = partial(self.instance.exports(self.store)["___cxx_global_var_init_69"], self.store)
+        self.__GLOBAL__sub_I_Modules_Terrain_Public_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_Terrain_Public_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_Terrain_Public_2_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_Terrain_Public_2_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_Terrain_Public_3_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_Terrain_Public_3_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_Terrain_VR_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_Terrain_VR_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_TextCoreScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_TextCoreScriptingClasses_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_TextCore_Native_FontEngine_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_TextCore_Native_FontEngine_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_TextRenderingScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_TextRenderingScriptingClasses_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_TextRendering_Public_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_TextRendering_Public_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_TilemapScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_TilemapScriptingClasses_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_Tilemap_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_Tilemap_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_Tilemap_Public_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_Tilemap_Public_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_UIElementsScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_UIElementsScriptingClasses_cpp"], self.store)
+        self.__GLOBAL__sub_I_External_Yoga_Yoga_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_External_Yoga_Yoga_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_UIScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_UIScriptingClasses_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_UI_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_UI_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_UI_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_UI_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_UI_2_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_UI_2_cpp"], self.store)
+        self.__GLOBAL__sub_I_umbra_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_umbra_cpp"], self.store)
+        self.__GLOBAL__sub_I_UnityAnalyticsScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_UnityAnalyticsScriptingClasses_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_UnityAnalytics_Dispatcher_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_UnityAnalytics_Dispatcher_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_UnityAdsSettings_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_UnityAdsSettings_cpp"], self.store)
+        self.__GLOBAL__sub_I_UnityWebRequestScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_UnityWebRequestScriptingClasses_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_UnityWebRequest_Public_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_UnityWebRequest_Public_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_VFXScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_VFXScriptingClasses_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_VFX_Public_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_VFX_Public_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_VFX_Public_2_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_VFX_Public_2_cpp"], self.store)
+        self.__GLOBAL__sub_I_VRScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_VRScriptingClasses_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_VR_2_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_VR_2_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_VR_PluginInterface_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_VR_PluginInterface_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_VideoScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_VideoScriptingClasses_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_Video_Public_Base_0_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_Video_Public_Base_0_cpp"], self.store)
+        self.__GLOBAL__sub_I_Wind_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Wind_cpp"], self.store)
+        self.__GLOBAL__sub_I_XRScriptingClasses_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_XRScriptingClasses_cpp"], self.store)
+        self.__GLOBAL__sub_I_Modules_XR_Subsystems_Input_Public_1_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Modules_XR_Subsystems_Input_Public_1_cpp"], self.store)
+        self.__GLOBAL__sub_I_Lump_libil2cpp_os_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Lump_libil2cpp_os_cpp"], self.store)
+        self.__GLOBAL__sub_I_Il2CppCodeRegistration_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Il2CppCodeRegistration_cpp"], self.store)
+        self.__GLOBAL__sub_I_Lump_libil2cpp_vm_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Lump_libil2cpp_vm_cpp"], self.store)
+        self.__GLOBAL__sub_I_Lump_libil2cpp_metadata_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Lump_libil2cpp_metadata_cpp"], self.store)
+        self.__GLOBAL__sub_I_Lump_libil2cpp_utils_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Lump_libil2cpp_utils_cpp"], self.store)
+        self.__GLOBAL__sub_I_Lump_libil2cpp_gc_cpp = partial(self.instance.exports(self.store)["__GLOBAL__sub_I_Lump_libil2cpp_gc_cpp"], self.store)
+        self._malloc = partial(self.instance.exports(self.store)["_malloc"], self.store)
+        self._free = partial(self.instance.exports(self.store)["_free"], self.store)
+        self._realloc = partial(self.instance.exports(self.store)["_realloc"], self.store)
+        self._memalign = partial(self.instance.exports(self.store)["_memalign"], self.store)
+        self.___errno_location = partial(self.instance.exports(self.store)["___errno_location"], self.store)
+        self._strlen = partial(self.instance.exports(self.store)["_strlen"], self.store)
+        self._ntohs = partial(self.instance.exports(self.store)["_ntohs"], self.store)
+        self._htonl = partial(self.instance.exports(self.store)["_htonl"], self.store)
+        self.___emscripten_environ_constructor = partial(self.instance.exports(self.store)["___emscripten_environ_constructor"], self.store)
+        self.__get_tzname = partial(self.instance.exports(self.store)["__get_tzname"], self.store)
+        self.__get_daylight = partial(self.instance.exports(self.store)["__get_daylight"], self.store)
+        self.__get_timezone = partial(self.instance.exports(self.store)["__get_timezone"], self.store)
+        self.__get_environ = partial(self.instance.exports(self.store)["__get_environ"], self.store)
+        self.___cxa_can_catch = partial(self.instance.exports(self.store)["___cxa_can_catch"], self.store)
+        self.___cxa_is_pointer_type = partial(self.instance.exports(self.store)["___cxa_is_pointer_type"], self.store)
+        self._i64Add = partial(self.instance.exports(self.store)["_i64Add"], self.store)
+        self._saveSetjmp = partial(self.instance.exports(self.store)["_saveSetjmp"], self.store)
+        self._testSetjmp = partial(self.instance.exports(self.store)["_testSetjmp"], self.store)
+        self._llvm_bswap_i32 = partial(self.instance.exports(self.store)["_llvm_bswap_i32"], self.store)
+        self._llvm_ctlz_i64 = partial(self.instance.exports(self.store)["_llvm_ctlz_i64"], self.store)
+        self._llvm_ctpop_i32 = partial(self.instance.exports(self.store)["_llvm_ctpop_i32"], self.store)
+        self._llvm_maxnum_f64 = partial(self.instance.exports(self.store)["_llvm_maxnum_f64"], self.store)
+        self._llvm_minnum_f32 = partial(self.instance.exports(self.store)["_llvm_minnum_f32"], self.store)
+        self._llvm_round_f32 = partial(self.instance.exports(self.store)["_llvm_round_f32"], self.store)
+        self._memcpy = partial(self.instance.exports(self.store)["_memcpy"], self.store)
+        self._memmove = partial(self.instance.exports(self.store)["_memmove"], self.store)
+        self._memset = partial(self.instance.exports(self.store)["_memset"], self.store)
+        self._rintf = partial(self.instance.exports(self.store)["_rintf"], self.store)
+        self._sbrk = partial(self.instance.exports(self.store)["_sbrk"], self.store)
+        self.dynCall_dddi = partial(self.instance.exports(self.store)["dynCall_dddi"], self.store)
+        self.dynCall_ddi = partial(self.instance.exports(self.store)["dynCall_ddi"], self.store)
+        self.dynCall_ddidi = partial(self.instance.exports(self.store)["dynCall_ddidi"], self.store)
+        self.dynCall_ddii = partial(self.instance.exports(self.store)["dynCall_ddii"], self.store)
+        self.dynCall_ddiii = partial(self.instance.exports(self.store)["dynCall_ddiii"], self.store)
+        self.dynCall_di = partial(self.instance.exports(self.store)["dynCall_di"], self.store)
+        self.dynCall_diddi = partial(self.instance.exports(self.store)["dynCall_diddi"], self.store)
+        self.dynCall_didi = partial(self.instance.exports(self.store)["dynCall_didi"], self.store)
+        self.dynCall_dii = partial(self.instance.exports(self.store)["dynCall_dii"], self.store)
+        self.dynCall_diidi = partial(self.instance.exports(self.store)["dynCall_diidi"], self.store)
+        self.dynCall_diii = partial(self.instance.exports(self.store)["dynCall_diii"], self.store)
+        self.dynCall_diiid = partial(self.instance.exports(self.store)["dynCall_diiid"], self.store)
+        self.dynCall_diiii = partial(self.instance.exports(self.store)["dynCall_diiii"], self.store)
+        self.dynCall_diiiii = partial(self.instance.exports(self.store)["dynCall_diiiii"], self.store)
+        self.dynCall_i = partial(self.instance.exports(self.store)["dynCall_i"], self.store)
+        self.dynCall_idddi = partial(self.instance.exports(self.store)["dynCall_idddi"], self.store)
+        self.dynCall_iddi = partial(self.instance.exports(self.store)["dynCall_iddi"], self.store)
+        self.dynCall_iddii = partial(self.instance.exports(self.store)["dynCall_iddii"], self.store)
+        self.dynCall_idi = partial(self.instance.exports(self.store)["dynCall_idi"], self.store)
+        self.dynCall_idii = partial(self.instance.exports(self.store)["dynCall_idii"], self.store)
+        self.dynCall_idiii = partial(self.instance.exports(self.store)["dynCall_idiii"], self.store)
+        self.dynCall_idiiii = partial(self.instance.exports(self.store)["dynCall_idiiii"], self.store)
+        self.dynCall_ii = partial(self.instance.exports(self.store)["dynCall_ii"], self.store)
+        self.dynCall_iiddi = partial(self.instance.exports(self.store)["dynCall_iiddi"], self.store)
+        self.dynCall_iidi = partial(self.instance.exports(self.store)["dynCall_iidi"], self.store)
+        self.dynCall_iidii = partial(self.instance.exports(self.store)["dynCall_iidii"], self.store)
+        self.dynCall_iidiii = partial(self.instance.exports(self.store)["dynCall_iidiii"], self.store)
+        self.dynCall_iii = partial(self.instance.exports(self.store)["dynCall_iii"], self.store)
+        self.dynCall_iiiddi = partial(self.instance.exports(self.store)["dynCall_iiiddi"], self.store)
+        self.dynCall_iiidi = partial(self.instance.exports(self.store)["dynCall_iiidi"], self.store)
+        self.dynCall_iiidii = partial(self.instance.exports(self.store)["dynCall_iiidii"], self.store)
+        self.dynCall_iiidiii = partial(self.instance.exports(self.store)["dynCall_iiidiii"], self.store)
+        self.dynCall_iiii = partial(self.instance.exports(self.store)["dynCall_iiii"], self.store)
+        self.dynCall_iiiii = partial(self.instance.exports(self.store)["dynCall_iiiii"], self.store)
+        self.dynCall_iiiiidii = partial(self.instance.exports(self.store)["dynCall_iiiiidii"], self.store)
+        self.dynCall_iiiiii = partial(self.instance.exports(self.store)["dynCall_iiiiii"], self.store)
+        self.dynCall_iiiiiii = partial(self.instance.exports(self.store)["dynCall_iiiiiii"], self.store)
+        self.dynCall_iiiiiiii = partial(self.instance.exports(self.store)["dynCall_iiiiiiii"], self.store)
+        self.dynCall_iiiiiiiii = partial(self.instance.exports(self.store)["dynCall_iiiiiiiii"], self.store)
+        self.dynCall_iiiiiiiiii = partial(self.instance.exports(self.store)["dynCall_iiiiiiiiii"], self.store)
+        self.dynCall_iiiiiiiiiii = partial(self.instance.exports(self.store)["dynCall_iiiiiiiiiii"], self.store)
+        self.dynCall_iiiiiiiiiiii = partial(self.instance.exports(self.store)["dynCall_iiiiiiiiiiii"], self.store)
+        self.dynCall_iiiiiiiiiiiii = partial(self.instance.exports(self.store)["dynCall_iiiiiiiiiiiii"], self.store)
+        self.dynCall_iiiiiiiiiiiiii = partial(self.instance.exports(self.store)["dynCall_iiiiiiiiiiiiii"], self.store)
+        self.dynCall_iiiiiiiiiiiiiii = partial(self.instance.exports(self.store)["dynCall_iiiiiiiiiiiiiii"], self.store)
+        self.dynCall_iiiiiiiiiiiiiiii = partial(self.instance.exports(self.store)["dynCall_iiiiiiiiiiiiiiii"], self.store)
+        self.dynCall_iiiiiiiiiiiiiiiii = partial(self.instance.exports(self.store)["dynCall_iiiiiiiiiiiiiiiii"], self.store)
+        self.dynCall_iiiiiiiiiiiiiiiiii = partial(self.instance.exports(self.store)["dynCall_iiiiiiiiiiiiiiiiii"], self.store)
+        self.dynCall_iiiiiiiiiiiiiiiiiii = partial(self.instance.exports(self.store)["dynCall_iiiiiiiiiiiiiiiiiii"], self.store)
+        self.dynCall_iiiiiiiiiiiiiiiiiiii = partial(self.instance.exports(self.store)["dynCall_iiiiiiiiiiiiiiiiiiii"], self.store)
+        self.dynCall_iiiiiiiiiiiiiiiiiiiii = partial(self.instance.exports(self.store)["dynCall_iiiiiiiiiiiiiiiiiiiii"], self.store)
+        self.dynCall_v = partial(self.instance.exports(self.store)["dynCall_v"], self.store)
+        self.dynCall_vd = partial(self.instance.exports(self.store)["dynCall_vd"], self.store)
+        self.dynCall_vdi = partial(self.instance.exports(self.store)["dynCall_vdi"], self.store)
+        self.dynCall_vi = partial(self.instance.exports(self.store)["dynCall_vi"], self.store)
+        self.dynCall_vid = partial(self.instance.exports(self.store)["dynCall_vid"], self.store)
+        self.dynCall_vidd = partial(self.instance.exports(self.store)["dynCall_vidd"], self.store)
+        self.dynCall_vidddi = partial(self.instance.exports(self.store)["dynCall_vidddi"], self.store)
+        self.dynCall_viddi = partial(self.instance.exports(self.store)["dynCall_viddi"], self.store)
+        self.dynCall_viddiiii = partial(self.instance.exports(self.store)["dynCall_viddiiii"], self.store)
+        self.dynCall_vidi = partial(self.instance.exports(self.store)["dynCall_vidi"], self.store)
+        self.dynCall_vidii = partial(self.instance.exports(self.store)["dynCall_vidii"], self.store)
+        self.dynCall_vidiii = partial(self.instance.exports(self.store)["dynCall_vidiii"], self.store)
+        self.dynCall_vii = partial(self.instance.exports(self.store)["dynCall_vii"], self.store)
+        self.dynCall_viid = partial(self.instance.exports(self.store)["dynCall_viid"], self.store)
+        self.dynCall_viidd = partial(self.instance.exports(self.store)["dynCall_viidd"], self.store)
+        self.dynCall_viidi = partial(self.instance.exports(self.store)["dynCall_viidi"], self.store)
+        self.dynCall_viidii = partial(self.instance.exports(self.store)["dynCall_viidii"], self.store)
+        self.dynCall_viii = partial(self.instance.exports(self.store)["dynCall_viii"], self.store)
+        self.dynCall_viiidi = partial(self.instance.exports(self.store)["dynCall_viiidi"], self.store)
+        self.dynCall_viiii = partial(self.instance.exports(self.store)["dynCall_viiii"], self.store)
+        self.dynCall_viiiiddi = partial(self.instance.exports(self.store)["dynCall_viiiiddi"], self.store)
+        self.dynCall_viiiii = partial(self.instance.exports(self.store)["dynCall_viiiii"], self.store)
+        self.dynCall_viiiiii = partial(self.instance.exports(self.store)["dynCall_viiiiii"], self.store)
+        self.dynCall_viiiiiii = partial(self.instance.exports(self.store)["dynCall_viiiiiii"], self.store)
+        self.dynCall_viiiiiiii = partial(self.instance.exports(self.store)["dynCall_viiiiiiii"], self.store)
+        self.dynCall_viiiiiiiii = partial(self.instance.exports(self.store)["dynCall_viiiiiiiii"], self.store)
+        self.dynCall_viiiiiiiiii = partial(self.instance.exports(self.store)["dynCall_viiiiiiiiii"], self.store)
+        self.dynCall_viiiiiiiiiii = partial(self.instance.exports(self.store)["dynCall_viiiiiiiiiii"], self.store)
+        self.dynCall_viiiiiiiiiiii = partial(self.instance.exports(self.store)["dynCall_viiiiiiiiiiii"], self.store)
+        self.dynCall_viiiiiiiiiiiii = partial(self.instance.exports(self.store)["dynCall_viiiiiiiiiiiii"], self.store)
+        self.dynCall_viiiiiiiiiiiiii = partial(self.instance.exports(self.store)["dynCall_viiiiiiiiiiiiii"], self.store)
+        self.dynCall_viiiiiiiiiiiiiii = partial(self.instance.exports(self.store)["dynCall_viiiiiiiiiiiiiii"], self.store)
+        self.dynCall_viiiiiiiiiiiiiiii = partial(self.instance.exports(self.store)["dynCall_viiiiiiiiiiiiiiii"], self.store)
+        self.dynCall_viiiiiiiiiiiiiiiii = partial(self.instance.exports(self.store)["dynCall_viiiiiiiiiiiiiiiii"], self.store)
+        self.dynCall_viiiiiiiiiiiiiiiiii = partial(self.instance.exports(self.store)["dynCall_viiiiiiiiiiiiiiiiii"], self.store)
+        self._SendMessageFloat = partial(self.instance.exports(self.store)["_SendMessageFloat"], self.store)
+        self.dynCall_dfi = partial(self.instance.exports(self.store)["dynCall_dfi"], self.store)
+        self.dynCall_dij = partial(self.instance.exports(self.store)["dynCall_dij"], self.store)
+        self.dynCall_diji = partial(self.instance.exports(self.store)["dynCall_diji"], self.store)
+        self.dynCall_dji = partial(self.instance.exports(self.store)["dynCall_dji"], self.store)
+        self.dynCall_f = partial(self.instance.exports(self.store)["dynCall_f"], self.store)
+        self.dynCall_fdi = partial(self.instance.exports(self.store)["dynCall_fdi"], self.store)
+        self.dynCall_ff = partial(self.instance.exports(self.store)["dynCall_ff"], self.store)
+        self.dynCall_fff = partial(self.instance.exports(self.store)["dynCall_fff"], self.store)
+        self.dynCall_ffff = partial(self.instance.exports(self.store)["dynCall_ffff"], self.store)
+        self.dynCall_fffff = partial(self.instance.exports(self.store)["dynCall_fffff"], self.store)
+        self.dynCall_ffffffi = partial(self.instance.exports(self.store)["dynCall_ffffffi"], self.store)
+        self.dynCall_fffffi = partial(self.instance.exports(self.store)["dynCall_fffffi"], self.store)
+        self.dynCall_ffffi = partial(self.instance.exports(self.store)["dynCall_ffffi"], self.store)
+        self.dynCall_ffffii = partial(self.instance.exports(self.store)["dynCall_ffffii"], self.store)
+        self.dynCall_fffi = partial(self.instance.exports(self.store)["dynCall_fffi"], self.store)
+        self.dynCall_fffiffffffi = partial(self.instance.exports(self.store)["dynCall_fffiffffffi"], self.store)
+        self.dynCall_fffifffffi = partial(self.instance.exports(self.store)["dynCall_fffifffffi"], self.store)
+        self.dynCall_fffifffi = partial(self.instance.exports(self.store)["dynCall_fffifffi"], self.store)
+        self.dynCall_fffifi = partial(self.instance.exports(self.store)["dynCall_fffifi"], self.store)
+        self.dynCall_fffii = partial(self.instance.exports(self.store)["dynCall_fffii"], self.store)
+        self.dynCall_fffiii = partial(self.instance.exports(self.store)["dynCall_fffiii"], self.store)
+        self.dynCall_ffi = partial(self.instance.exports(self.store)["dynCall_ffi"], self.store)
+        self.dynCall_fi = partial(self.instance.exports(self.store)["dynCall_fi"], self.store)
+        self.dynCall_fidi = partial(self.instance.exports(self.store)["dynCall_fidi"], self.store)
+        self.dynCall_fif = partial(self.instance.exports(self.store)["dynCall_fif"], self.store)
+        self.dynCall_fiff = partial(self.instance.exports(self.store)["dynCall_fiff"], self.store)
+        self.dynCall_fiffffi = partial(self.instance.exports(self.store)["dynCall_fiffffi"], self.store)
+        self.dynCall_fifffi = partial(self.instance.exports(self.store)["dynCall_fifffi"], self.store)
+        self.dynCall_fiffi = partial(self.instance.exports(self.store)["dynCall_fiffi"], self.store)
+        self.dynCall_fifi = partial(self.instance.exports(self.store)["dynCall_fifi"], self.store)
+        self.dynCall_fifii = partial(self.instance.exports(self.store)["dynCall_fifii"], self.store)
+        self.dynCall_fii = partial(self.instance.exports(self.store)["dynCall_fii"], self.store)
+        self.dynCall_fiif = partial(self.instance.exports(self.store)["dynCall_fiif"], self.store)
+        self.dynCall_fiifdi = partial(self.instance.exports(self.store)["dynCall_fiifdi"], self.store)
+        self.dynCall_fiiffffi = partial(self.instance.exports(self.store)["dynCall_fiiffffi"], self.store)
+        self.dynCall_fiiffi = partial(self.instance.exports(self.store)["dynCall_fiiffi"], self.store)
+        self.dynCall_fiifi = partial(self.instance.exports(self.store)["dynCall_fiifi"], self.store)
+        self.dynCall_fiifii = partial(self.instance.exports(self.store)["dynCall_fiifii"], self.store)
+        self.dynCall_fiifji = partial(self.instance.exports(self.store)["dynCall_fiifji"], self.store)
+        self.dynCall_fiii = partial(self.instance.exports(self.store)["dynCall_fiii"], self.store)
+        self.dynCall_fiiif = partial(self.instance.exports(self.store)["dynCall_fiiif"], self.store)
+        self.dynCall_fiiii = partial(self.instance.exports(self.store)["dynCall_fiiii"], self.store)
+        self.dynCall_fiiiif = partial(self.instance.exports(self.store)["dynCall_fiiiif"], self.store)
+        self.dynCall_fiiiii = partial(self.instance.exports(self.store)["dynCall_fiiiii"], self.store)
+        self.dynCall_fiiiiii = partial(self.instance.exports(self.store)["dynCall_fiiiiii"], self.store)
+        self.dynCall_fiiiiiifiifif = partial(self.instance.exports(self.store)["dynCall_fiiiiiifiifif"], self.store)
+        self.dynCall_fiiiiiifiiiif = partial(self.instance.exports(self.store)["dynCall_fiiiiiifiiiif"], self.store)
+        self.dynCall_fji = partial(self.instance.exports(self.store)["dynCall_fji"], self.store)
+        self.dynCall_iffffffi = partial(self.instance.exports(self.store)["dynCall_iffffffi"], self.store)
+        self.dynCall_iffffi = partial(self.instance.exports(self.store)["dynCall_iffffi"], self.store)
+        self.dynCall_ifffi = partial(self.instance.exports(self.store)["dynCall_ifffi"], self.store)
+        self.dynCall_iffi = partial(self.instance.exports(self.store)["dynCall_iffi"], self.store)
+        self.dynCall_ifi = partial(self.instance.exports(self.store)["dynCall_ifi"], self.store)
+        self.dynCall_ifii = partial(self.instance.exports(self.store)["dynCall_ifii"], self.store)
+        self.dynCall_ifiii = partial(self.instance.exports(self.store)["dynCall_ifiii"], self.store)
+        self.dynCall_ifiiii = partial(self.instance.exports(self.store)["dynCall_ifiiii"], self.store)
+        self.dynCall_iif = partial(self.instance.exports(self.store)["dynCall_iif"], self.store)
+        self.dynCall_iiff = partial(self.instance.exports(self.store)["dynCall_iiff"], self.store)
+        self.dynCall_iifff = partial(self.instance.exports(self.store)["dynCall_iifff"], self.store)
+        self.dynCall_iiffffffiii = partial(self.instance.exports(self.store)["dynCall_iiffffffiii"], self.store)
+        self.dynCall_iiffffi = partial(self.instance.exports(self.store)["dynCall_iiffffi"], self.store)
+        self.dynCall_iiffffiii = partial(self.instance.exports(self.store)["dynCall_iiffffiii"], self.store)
+        self.dynCall_iifffi = partial(self.instance.exports(self.store)["dynCall_iifffi"], self.store)
+        self.dynCall_iifffiii = partial(self.instance.exports(self.store)["dynCall_iifffiii"], self.store)
+        self.dynCall_iiffi = partial(self.instance.exports(self.store)["dynCall_iiffi"], self.store)
+        self.dynCall_iiffifiii = partial(self.instance.exports(self.store)["dynCall_iiffifiii"], self.store)
+        self.dynCall_iiffii = partial(self.instance.exports(self.store)["dynCall_iiffii"], self.store)
+        self.dynCall_iiffiii = partial(self.instance.exports(self.store)["dynCall_iiffiii"], self.store)
+        self.dynCall_iiffiiiii = partial(self.instance.exports(self.store)["dynCall_iiffiiiii"], self.store)
+        self.dynCall_iifi = partial(self.instance.exports(self.store)["dynCall_iifi"], self.store)
+        self.dynCall_iifii = partial(self.instance.exports(self.store)["dynCall_iifii"], self.store)
+        self.dynCall_iifiifii = partial(self.instance.exports(self.store)["dynCall_iifiifii"], self.store)
+        self.dynCall_iifiifiii = partial(self.instance.exports(self.store)["dynCall_iifiifiii"], self.store)
+        self.dynCall_iifiii = partial(self.instance.exports(self.store)["dynCall_iifiii"], self.store)
+        self.dynCall_iifiiii = partial(self.instance.exports(self.store)["dynCall_iifiiii"], self.store)
+        self.dynCall_iifiiiii = partial(self.instance.exports(self.store)["dynCall_iifiiiii"], self.store)
+        self.dynCall_iifiiiiii = partial(self.instance.exports(self.store)["dynCall_iifiiiiii"], self.store)
+        self.dynCall_iiif = partial(self.instance.exports(self.store)["dynCall_iiif"], self.store)
+        self.dynCall_iiiffffi = partial(self.instance.exports(self.store)["dynCall_iiiffffi"], self.store)
+        self.dynCall_iiifffi = partial(self.instance.exports(self.store)["dynCall_iiifffi"], self.store)
+        self.dynCall_iiifffii = partial(self.instance.exports(self.store)["dynCall_iiifffii"], self.store)
+        self.dynCall_iiiffi = partial(self.instance.exports(self.store)["dynCall_iiiffi"], self.store)
+        self.dynCall_iiiffifiii = partial(self.instance.exports(self.store)["dynCall_iiiffifiii"], self.store)
+        self.dynCall_iiiffii = partial(self.instance.exports(self.store)["dynCall_iiiffii"], self.store)
+        self.dynCall_iiiffiii = partial(self.instance.exports(self.store)["dynCall_iiiffiii"], self.store)
+        self.dynCall_iiifi = partial(self.instance.exports(self.store)["dynCall_iiifi"], self.store)
+        self.dynCall_iiififi = partial(self.instance.exports(self.store)["dynCall_iiififi"], self.store)
+        self.dynCall_iiififii = partial(self.instance.exports(self.store)["dynCall_iiififii"], self.store)
+        self.dynCall_iiififiii = partial(self.instance.exports(self.store)["dynCall_iiififiii"], self.store)
+        self.dynCall_iiififiiii = partial(self.instance.exports(self.store)["dynCall_iiififiiii"], self.store)
+        self.dynCall_iiifii = partial(self.instance.exports(self.store)["dynCall_iiifii"], self.store)
+        self.dynCall_iiifiifii = partial(self.instance.exports(self.store)["dynCall_iiifiifii"], self.store)
+        self.dynCall_iiifiifiii = partial(self.instance.exports(self.store)["dynCall_iiifiifiii"], self.store)
+        self.dynCall_iiifiifiiii = partial(self.instance.exports(self.store)["dynCall_iiifiifiiii"], self.store)
+        self.dynCall_iiifiii = partial(self.instance.exports(self.store)["dynCall_iiifiii"], self.store)
+        self.dynCall_iiifiiii = partial(self.instance.exports(self.store)["dynCall_iiifiiii"], self.store)
+        self.dynCall_iiifiiiii = partial(self.instance.exports(self.store)["dynCall_iiifiiiii"], self.store)
+        self.dynCall_iiiifffffi = partial(self.instance.exports(self.store)["dynCall_iiiifffffi"], self.store)
+        self.dynCall_iiiifffffii = partial(self.instance.exports(self.store)["dynCall_iiiifffffii"], self.store)
+        self.dynCall_iiiiffffi = partial(self.instance.exports(self.store)["dynCall_iiiiffffi"], self.store)
+        self.dynCall_iiiiffi = partial(self.instance.exports(self.store)["dynCall_iiiiffi"], self.store)
+        self.dynCall_iiiiffii = partial(self.instance.exports(self.store)["dynCall_iiiiffii"], self.store)
+        self.dynCall_iiiifi = partial(self.instance.exports(self.store)["dynCall_iiiifi"], self.store)
+        self.dynCall_iiiififi = partial(self.instance.exports(self.store)["dynCall_iiiififi"], self.store)
+        self.dynCall_iiiifii = partial(self.instance.exports(self.store)["dynCall_iiiifii"], self.store)
+        self.dynCall_iiiifiii = partial(self.instance.exports(self.store)["dynCall_iiiifiii"], self.store)
+        self.dynCall_iiiifiiii = partial(self.instance.exports(self.store)["dynCall_iiiifiiii"], self.store)
+        self.dynCall_iiiifiiiii = partial(self.instance.exports(self.store)["dynCall_iiiifiiiii"], self.store)
+        self.dynCall_iiiiifi = partial(self.instance.exports(self.store)["dynCall_iiiiifi"], self.store)
+        self.dynCall_iiiiifii = partial(self.instance.exports(self.store)["dynCall_iiiiifii"], self.store)
+        self.dynCall_iiiiifiii = partial(self.instance.exports(self.store)["dynCall_iiiiifiii"], self.store)
+        self.dynCall_iiiiifiiiiif = partial(self.instance.exports(self.store)["dynCall_iiiiifiiiiif"], self.store)
+        self.dynCall_iiiiiifff = partial(self.instance.exports(self.store)["dynCall_iiiiiifff"], self.store)
+        self.dynCall_iiiiiifffiiifiii = partial(self.instance.exports(self.store)["dynCall_iiiiiifffiiifiii"], self.store)
+        self.dynCall_iiiiiiffiiiiiiiiiffffiii = partial(self.instance.exports(self.store)["dynCall_iiiiiiffiiiiiiiiiffffiii"], self.store)
+        self.dynCall_iiiiiiffiiiiiiiiiffffiiii = partial(self.instance.exports(self.store)["dynCall_iiiiiiffiiiiiiiiiffffiiii"], self.store)
+        self.dynCall_iiiiiiffiiiiiiiiiiiiiii = partial(self.instance.exports(self.store)["dynCall_iiiiiiffiiiiiiiiiiiiiii"], self.store)
+        self.dynCall_iiiiiifi = partial(self.instance.exports(self.store)["dynCall_iiiiiifi"], self.store)
+        self.dynCall_iiiiiifiif = partial(self.instance.exports(self.store)["dynCall_iiiiiifiif"], self.store)
+        self.dynCall_iiiiiifiii = partial(self.instance.exports(self.store)["dynCall_iiiiiifiii"], self.store)
+        self.dynCall_iiiiiiifiif = partial(self.instance.exports(self.store)["dynCall_iiiiiiifiif"], self.store)
+        self.dynCall_iiiiij = partial(self.instance.exports(self.store)["dynCall_iiiiij"], self.store)
+        self.dynCall_iiiiiji = partial(self.instance.exports(self.store)["dynCall_iiiiiji"], self.store)
+        self.dynCall_iiiij = partial(self.instance.exports(self.store)["dynCall_iiiij"], self.store)
+        self.dynCall_iiiiji = partial(self.instance.exports(self.store)["dynCall_iiiiji"], self.store)
+        self.dynCall_iiiijii = partial(self.instance.exports(self.store)["dynCall_iiiijii"], self.store)
+        self.dynCall_iiiijiiii = partial(self.instance.exports(self.store)["dynCall_iiiijiiii"], self.store)
+        self.dynCall_iiiijjii = partial(self.instance.exports(self.store)["dynCall_iiiijjii"], self.store)
+        self.dynCall_iiiijjiiii = partial(self.instance.exports(self.store)["dynCall_iiiijjiiii"], self.store)
+        self.dynCall_iiij = partial(self.instance.exports(self.store)["dynCall_iiij"], self.store)
+        self.dynCall_iiiji = partial(self.instance.exports(self.store)["dynCall_iiiji"], self.store)
+        self.dynCall_iiijii = partial(self.instance.exports(self.store)["dynCall_iiijii"], self.store)
+        self.dynCall_iiijiii = partial(self.instance.exports(self.store)["dynCall_iiijiii"], self.store)
+        self.dynCall_iiijji = partial(self.instance.exports(self.store)["dynCall_iiijji"], self.store)
+        self.dynCall_iiijjii = partial(self.instance.exports(self.store)["dynCall_iiijjii"], self.store)
+        self.dynCall_iiijjiii = partial(self.instance.exports(self.store)["dynCall_iiijjiii"], self.store)
+        self.dynCall_iiijjiiii = partial(self.instance.exports(self.store)["dynCall_iiijjiiii"], self.store)
+        self.dynCall_iij = partial(self.instance.exports(self.store)["dynCall_iij"], self.store)
+        self.dynCall_iiji = partial(self.instance.exports(self.store)["dynCall_iiji"], self.store)
+        self.dynCall_iijii = partial(self.instance.exports(self.store)["dynCall_iijii"], self.store)
+        self.dynCall_iijiii = partial(self.instance.exports(self.store)["dynCall_iijiii"], self.store)
+        self.dynCall_iijiiii = partial(self.instance.exports(self.store)["dynCall_iijiiii"], self.store)
+        self.dynCall_iijiiiiii = partial(self.instance.exports(self.store)["dynCall_iijiiiiii"], self.store)
+        self.dynCall_iijji = partial(self.instance.exports(self.store)["dynCall_iijji"], self.store)
+        self.dynCall_iijjii = partial(self.instance.exports(self.store)["dynCall_iijjii"], self.store)
+        self.dynCall_iijjiii = partial(self.instance.exports(self.store)["dynCall_iijjiii"], self.store)
+        self.dynCall_iijjji = partial(self.instance.exports(self.store)["dynCall_iijjji"], self.store)
+        self.dynCall_ij = partial(self.instance.exports(self.store)["dynCall_ij"], self.store)
+        self.dynCall_iji = partial(self.instance.exports(self.store)["dynCall_iji"], self.store)
+        self.dynCall_ijii = partial(self.instance.exports(self.store)["dynCall_ijii"], self.store)
+        self.dynCall_ijiii = partial(self.instance.exports(self.store)["dynCall_ijiii"], self.store)
+        self.dynCall_ijiiii = partial(self.instance.exports(self.store)["dynCall_ijiiii"], self.store)
+        self.dynCall_ijj = partial(self.instance.exports(self.store)["dynCall_ijj"], self.store)
+        self.dynCall_ijji = partial(self.instance.exports(self.store)["dynCall_ijji"], self.store)
+        self.dynCall_j = partial(self.instance.exports(self.store)["dynCall_j"], self.store)
+        self.dynCall_jdi = partial(self.instance.exports(self.store)["dynCall_jdi"], self.store)
+        self.dynCall_jdii = partial(self.instance.exports(self.store)["dynCall_jdii"], self.store)
+        self.dynCall_jfi = partial(self.instance.exports(self.store)["dynCall_jfi"], self.store)
+        self.dynCall_ji = partial(self.instance.exports(self.store)["dynCall_ji"], self.store)
+        self.dynCall_jid = partial(self.instance.exports(self.store)["dynCall_jid"], self.store)
+        self.dynCall_jidi = partial(self.instance.exports(self.store)["dynCall_jidi"], self.store)
+        self.dynCall_jidii = partial(self.instance.exports(self.store)["dynCall_jidii"], self.store)
+        self.dynCall_jii = partial(self.instance.exports(self.store)["dynCall_jii"], self.store)
+        self.dynCall_jiii = partial(self.instance.exports(self.store)["dynCall_jiii"], self.store)
+        self.dynCall_jiiii = partial(self.instance.exports(self.store)["dynCall_jiiii"], self.store)
+        self.dynCall_jiiiii = partial(self.instance.exports(self.store)["dynCall_jiiiii"], self.store)
+        self.dynCall_jiiiiii = partial(self.instance.exports(self.store)["dynCall_jiiiiii"], self.store)
+        self.dynCall_jiiiiiiiii = partial(self.instance.exports(self.store)["dynCall_jiiiiiiiii"], self.store)
+        self.dynCall_jiiiiiiiiii = partial(self.instance.exports(self.store)["dynCall_jiiiiiiiiii"], self.store)
+        self.dynCall_jiiij = partial(self.instance.exports(self.store)["dynCall_jiiij"], self.store)
+        self.dynCall_jiiji = partial(self.instance.exports(self.store)["dynCall_jiiji"], self.store)
+        self.dynCall_jiji = partial(self.instance.exports(self.store)["dynCall_jiji"], self.store)
+        self.dynCall_jijii = partial(self.instance.exports(self.store)["dynCall_jijii"], self.store)
+        self.dynCall_jijiii = partial(self.instance.exports(self.store)["dynCall_jijiii"], self.store)
+        self.dynCall_jijj = partial(self.instance.exports(self.store)["dynCall_jijj"], self.store)
+        self.dynCall_jijji = partial(self.instance.exports(self.store)["dynCall_jijji"], self.store)
+        self.dynCall_jji = partial(self.instance.exports(self.store)["dynCall_jji"], self.store)
+        self.dynCall_jjii = partial(self.instance.exports(self.store)["dynCall_jjii"], self.store)
+        self.dynCall_jjji = partial(self.instance.exports(self.store)["dynCall_jjji"], self.store)
+        self.dynCall_jjjji = partial(self.instance.exports(self.store)["dynCall_jjjji"], self.store)
+        self.dynCall_vf = partial(self.instance.exports(self.store)["dynCall_vf"], self.store)
+        self.dynCall_vff = partial(self.instance.exports(self.store)["dynCall_vff"], self.store)
+        self.dynCall_vfff = partial(self.instance.exports(self.store)["dynCall_vfff"], self.store)
+        self.dynCall_vffff = partial(self.instance.exports(self.store)["dynCall_vffff"], self.store)
+        self.dynCall_vfffffffffiiii = partial(self.instance.exports(self.store)["dynCall_vfffffffffiiii"], self.store)
+        self.dynCall_vffffi = partial(self.instance.exports(self.store)["dynCall_vffffi"], self.store)
+        self.dynCall_vfffi = partial(self.instance.exports(self.store)["dynCall_vfffi"], self.store)
+        self.dynCall_vffi = partial(self.instance.exports(self.store)["dynCall_vffi"], self.store)
+        self.dynCall_vfi = partial(self.instance.exports(self.store)["dynCall_vfi"], self.store)
+        self.dynCall_vfii = partial(self.instance.exports(self.store)["dynCall_vfii"], self.store)
+        self.dynCall_vfiii = partial(self.instance.exports(self.store)["dynCall_vfiii"], self.store)
+        self.dynCall_vfiiiii = partial(self.instance.exports(self.store)["dynCall_vfiiiii"], self.store)
+        self.dynCall_vif = partial(self.instance.exports(self.store)["dynCall_vif"], self.store)
+        self.dynCall_viff = partial(self.instance.exports(self.store)["dynCall_viff"], self.store)
+        self.dynCall_vifff = partial(self.instance.exports(self.store)["dynCall_vifff"], self.store)
+        self.dynCall_viffff = partial(self.instance.exports(self.store)["dynCall_viffff"], self.store)
+        self.dynCall_viffffffffffffiiii = partial(self.instance.exports(self.store)["dynCall_viffffffffffffiiii"], self.store)
+        self.dynCall_vifffffffi = partial(self.instance.exports(self.store)["dynCall_vifffffffi"], self.store)
+        self.dynCall_viffffffi = partial(self.instance.exports(self.store)["dynCall_viffffffi"], self.store)
+        self.dynCall_vifffffi = partial(self.instance.exports(self.store)["dynCall_vifffffi"], self.store)
+        self.dynCall_viffffi = partial(self.instance.exports(self.store)["dynCall_viffffi"], self.store)
+        self.dynCall_viffffii = partial(self.instance.exports(self.store)["dynCall_viffffii"], self.store)
+        self.dynCall_viffffiifffiiiiif = partial(self.instance.exports(self.store)["dynCall_viffffiifffiiiiif"], self.store)
+        self.dynCall_viffffiii = partial(self.instance.exports(self.store)["dynCall_viffffiii"], self.store)
+        self.dynCall_vifffi = partial(self.instance.exports(self.store)["dynCall_vifffi"], self.store)
+        self.dynCall_vifffii = partial(self.instance.exports(self.store)["dynCall_vifffii"], self.store)
+        self.dynCall_viffi = partial(self.instance.exports(self.store)["dynCall_viffi"], self.store)
+        self.dynCall_viffii = partial(self.instance.exports(self.store)["dynCall_viffii"], self.store)
+        self.dynCall_viffiifffffiii = partial(self.instance.exports(self.store)["dynCall_viffiifffffiii"], self.store)
+        self.dynCall_viffiii = partial(self.instance.exports(self.store)["dynCall_viffiii"], self.store)
+        self.dynCall_viffiiifi = partial(self.instance.exports(self.store)["dynCall_viffiiifi"], self.store)
+        self.dynCall_viffiiiif = partial(self.instance.exports(self.store)["dynCall_viffiiiif"], self.store)
+        self.dynCall_vifi = partial(self.instance.exports(self.store)["dynCall_vifi"], self.store)
+        self.dynCall_vififiii = partial(self.instance.exports(self.store)["dynCall_vififiii"], self.store)
+        self.dynCall_vifii = partial(self.instance.exports(self.store)["dynCall_vifii"], self.store)
+        self.dynCall_vifiii = partial(self.instance.exports(self.store)["dynCall_vifiii"], self.store)
+        self.dynCall_vifiiii = partial(self.instance.exports(self.store)["dynCall_vifiiii"], self.store)
+        self.dynCall_vifiiiii = partial(self.instance.exports(self.store)["dynCall_vifiiiii"], self.store)
+        self.dynCall_viif = partial(self.instance.exports(self.store)["dynCall_viif"], self.store)
+        self.dynCall_viiff = partial(self.instance.exports(self.store)["dynCall_viiff"], self.store)
+        self.dynCall_viifff = partial(self.instance.exports(self.store)["dynCall_viifff"], self.store)
+        self.dynCall_viiffffffffi = partial(self.instance.exports(self.store)["dynCall_viiffffffffi"], self.store)
+        self.dynCall_viiffffffffiii = partial(self.instance.exports(self.store)["dynCall_viiffffffffiii"], self.store)
+        self.dynCall_viifffffffi = partial(self.instance.exports(self.store)["dynCall_viifffffffi"], self.store)
+        self.dynCall_viiffffffi = partial(self.instance.exports(self.store)["dynCall_viiffffffi"], self.store)
+        self.dynCall_viifffffi = partial(self.instance.exports(self.store)["dynCall_viifffffi"], self.store)
+        self.dynCall_viiffffi = partial(self.instance.exports(self.store)["dynCall_viiffffi"], self.store)
+        self.dynCall_viifffi = partial(self.instance.exports(self.store)["dynCall_viifffi"], self.store)
+        self.dynCall_viiffi = partial(self.instance.exports(self.store)["dynCall_viiffi"], self.store)
+        self.dynCall_viiffifiii = partial(self.instance.exports(self.store)["dynCall_viiffifiii"], self.store)
+        self.dynCall_viiffii = partial(self.instance.exports(self.store)["dynCall_viiffii"], self.store)
+        self.dynCall_viiffiifi = partial(self.instance.exports(self.store)["dynCall_viiffiifi"], self.store)
+        self.dynCall_viiffiifiii = partial(self.instance.exports(self.store)["dynCall_viiffiifiii"], self.store)
+        self.dynCall_viiffiiii = partial(self.instance.exports(self.store)["dynCall_viiffiiii"], self.store)
+        self.dynCall_viiffiiiii = partial(self.instance.exports(self.store)["dynCall_viiffiiiii"], self.store)
+        self.dynCall_viifi = partial(self.instance.exports(self.store)["dynCall_viifi"], self.store)
+        self.dynCall_viififii = partial(self.instance.exports(self.store)["dynCall_viififii"], self.store)
+        self.dynCall_viififiii = partial(self.instance.exports(self.store)["dynCall_viififiii"], self.store)
+        self.dynCall_viifii = partial(self.instance.exports(self.store)["dynCall_viifii"], self.store)
+        self.dynCall_viifiii = partial(self.instance.exports(self.store)["dynCall_viifiii"], self.store)
+        self.dynCall_viifiiii = partial(self.instance.exports(self.store)["dynCall_viifiiii"], self.store)
+        self.dynCall_viiif = partial(self.instance.exports(self.store)["dynCall_viiif"], self.store)
+        self.dynCall_viiifffi = partial(self.instance.exports(self.store)["dynCall_viiifffi"], self.store)
+        self.dynCall_viiifffiiij = partial(self.instance.exports(self.store)["dynCall_viiifffiiij"], self.store)
+        self.dynCall_viiiffi = partial(self.instance.exports(self.store)["dynCall_viiiffi"], self.store)
+        self.dynCall_viiiffii = partial(self.instance.exports(self.store)["dynCall_viiiffii"], self.store)
+        self.dynCall_viiifi = partial(self.instance.exports(self.store)["dynCall_viiifi"], self.store)
+        self.dynCall_viiififfi = partial(self.instance.exports(self.store)["dynCall_viiififfi"], self.store)
+        self.dynCall_viiififi = partial(self.instance.exports(self.store)["dynCall_viiififi"], self.store)
+        self.dynCall_viiififii = partial(self.instance.exports(self.store)["dynCall_viiififii"], self.store)
+        self.dynCall_viiifii = partial(self.instance.exports(self.store)["dynCall_viiifii"], self.store)
+        self.dynCall_viiifiii = partial(self.instance.exports(self.store)["dynCall_viiifiii"], self.store)
+        self.dynCall_viiifiiiii = partial(self.instance.exports(self.store)["dynCall_viiifiiiii"], self.store)
+        self.dynCall_viiiif = partial(self.instance.exports(self.store)["dynCall_viiiif"], self.store)
+        self.dynCall_viiiiffffffi = partial(self.instance.exports(self.store)["dynCall_viiiiffffffi"], self.store)
+        self.dynCall_viiiifffffi = partial(self.instance.exports(self.store)["dynCall_viiiifffffi"], self.store)
+        self.dynCall_viiiiffffii = partial(self.instance.exports(self.store)["dynCall_viiiiffffii"], self.store)
+        self.dynCall_viiiifffi = partial(self.instance.exports(self.store)["dynCall_viiiifffi"], self.store)
+        self.dynCall_viiiiffiii = partial(self.instance.exports(self.store)["dynCall_viiiiffiii"], self.store)
+        self.dynCall_viiiifi = partial(self.instance.exports(self.store)["dynCall_viiiifi"], self.store)
+        self.dynCall_viiiififfi = partial(self.instance.exports(self.store)["dynCall_viiiififfi"], self.store)
+        self.dynCall_viiiifii = partial(self.instance.exports(self.store)["dynCall_viiiifii"], self.store)
+        self.dynCall_viiiifiifi = partial(self.instance.exports(self.store)["dynCall_viiiifiifi"], self.store)
+        self.dynCall_viiiifiii = partial(self.instance.exports(self.store)["dynCall_viiiifiii"], self.store)
+        self.dynCall_viiiifiiii = partial(self.instance.exports(self.store)["dynCall_viiiifiiii"], self.store)
+        self.dynCall_viiiifiiiii = partial(self.instance.exports(self.store)["dynCall_viiiifiiiii"], self.store)
+        self.dynCall_viiiifiiiiif = partial(self.instance.exports(self.store)["dynCall_viiiifiiiiif"], self.store)
+        self.dynCall_viiiifiiiiiiii = partial(self.instance.exports(self.store)["dynCall_viiiifiiiiiiii"], self.store)
+        self.dynCall_viiiiif = partial(self.instance.exports(self.store)["dynCall_viiiiif"], self.store)
+        self.dynCall_viiiiiffi = partial(self.instance.exports(self.store)["dynCall_viiiiiffi"], self.store)
+        self.dynCall_viiiiiffii = partial(self.instance.exports(self.store)["dynCall_viiiiiffii"], self.store)
+        self.dynCall_viiiiifi = partial(self.instance.exports(self.store)["dynCall_viiiiifi"], self.store)
+        self.dynCall_viiiiifiii = partial(self.instance.exports(self.store)["dynCall_viiiiifiii"], self.store)
+        self.dynCall_viiiiiif = partial(self.instance.exports(self.store)["dynCall_viiiiiif"], self.store)
+        self.dynCall_viiiiiifddfiii = partial(self.instance.exports(self.store)["dynCall_viiiiiifddfiii"], self.store)
+        self.dynCall_viiiiiiffffiii = partial(self.instance.exports(self.store)["dynCall_viiiiiiffffiii"], self.store)
+        self.dynCall_viiiiiifiifiii = partial(self.instance.exports(self.store)["dynCall_viiiiiifiifiii"], self.store)
+        self.dynCall_viiiiiifjjfiii = partial(self.instance.exports(self.store)["dynCall_viiiiiifjjfiii"], self.store)
+        self.dynCall_viiiiiiifddfii = partial(self.instance.exports(self.store)["dynCall_viiiiiiifddfii"], self.store)
+        self.dynCall_viiiiiiiffffii = partial(self.instance.exports(self.store)["dynCall_viiiiiiiffffii"], self.store)
+        self.dynCall_viiiiiiifiifii = partial(self.instance.exports(self.store)["dynCall_viiiiiiifiifii"], self.store)
+        self.dynCall_viiiiiiifjjfii = partial(self.instance.exports(self.store)["dynCall_viiiiiiifjjfii"], self.store)
+        self.dynCall_viiiiiiiiiiifii = partial(self.instance.exports(self.store)["dynCall_viiiiiiiiiiifii"], self.store)
+        self.dynCall_viiiiiji = partial(self.instance.exports(self.store)["dynCall_viiiiiji"], self.store)
+        self.dynCall_viiiij = partial(self.instance.exports(self.store)["dynCall_viiiij"], self.store)
+        self.dynCall_viiiijii = partial(self.instance.exports(self.store)["dynCall_viiiijii"], self.store)
+        self.dynCall_viiiijiiii = partial(self.instance.exports(self.store)["dynCall_viiiijiiii"], self.store)
+        self.dynCall_viiij = partial(self.instance.exports(self.store)["dynCall_viiij"], self.store)
+        self.dynCall_viiiji = partial(self.instance.exports(self.store)["dynCall_viiiji"], self.store)
+        self.dynCall_viiijji = partial(self.instance.exports(self.store)["dynCall_viiijji"], self.store)
+        self.dynCall_viij = partial(self.instance.exports(self.store)["dynCall_viij"], self.store)
+        self.dynCall_viiji = partial(self.instance.exports(self.store)["dynCall_viiji"], self.store)
+        self.dynCall_viijii = partial(self.instance.exports(self.store)["dynCall_viijii"], self.store)
+        self.dynCall_viijiii = partial(self.instance.exports(self.store)["dynCall_viijiii"], self.store)
+        self.dynCall_viijiijiii = partial(self.instance.exports(self.store)["dynCall_viijiijiii"], self.store)
+        self.dynCall_viijijii = partial(self.instance.exports(self.store)["dynCall_viijijii"], self.store)
+        self.dynCall_viijijiii = partial(self.instance.exports(self.store)["dynCall_viijijiii"], self.store)
+        self.dynCall_viijijj = partial(self.instance.exports(self.store)["dynCall_viijijj"], self.store)
+        self.dynCall_viijj = partial(self.instance.exports(self.store)["dynCall_viijj"], self.store)
+        self.dynCall_viijji = partial(self.instance.exports(self.store)["dynCall_viijji"], self.store)
+        self.dynCall_viijjii = partial(self.instance.exports(self.store)["dynCall_viijjii"], self.store)
+        self.dynCall_viijjiii = partial(self.instance.exports(self.store)["dynCall_viijjiii"], self.store)
+        self.dynCall_viijjji = partial(self.instance.exports(self.store)["dynCall_viijjji"], self.store)
+        self.dynCall_vij = partial(self.instance.exports(self.store)["dynCall_vij"], self.store)
+        self.dynCall_viji = partial(self.instance.exports(self.store)["dynCall_viji"], self.store)
+        self.dynCall_vijii = partial(self.instance.exports(self.store)["dynCall_vijii"], self.store)
+        self.dynCall_vijiii = partial(self.instance.exports(self.store)["dynCall_vijiii"], self.store)
+        self.dynCall_vijiiii = partial(self.instance.exports(self.store)["dynCall_vijiiii"], self.store)
+        self.dynCall_vijiji = partial(self.instance.exports(self.store)["dynCall_vijiji"], self.store)
+        self.dynCall_vijijji = partial(self.instance.exports(self.store)["dynCall_vijijji"], self.store)
+        self.dynCall_vijji = partial(self.instance.exports(self.store)["dynCall_vijji"], self.store)
+        self.dynCall_vijjii = partial(self.instance.exports(self.store)["dynCall_vijjii"], self.store)
+        self.dynCall_vijjji = partial(self.instance.exports(self.store)["dynCall_vijjji"], self.store)
+        self.dynCall_vji = partial(self.instance.exports(self.store)["dynCall_vji"], self.store)
+        self.dynCall_vjii = partial(self.instance.exports(self.store)["dynCall_vjii"], self.store)
+        self.dynCall_vjiiii = partial(self.instance.exports(self.store)["dynCall_vjiiii"], self.store)
+        self.dynCall_vjji = partial(self.instance.exports(self.store)["dynCall_vjji"], self.store)
 
-def Pointer_stringify(ptr, length=None):
-    if (length == 0 or  not ptr):
-        return ""
-    hasUtf = 0
-    i = 0
-    while True:
-        t = HEAPU8[ptr + i]
-        hasUtf |= t
-        if t == 0 and not length:
-            break
-        i += 1
-        if length and i == length:
-            break
+    def init_byte_func(self):
+        """
+        byte array function
+        """
+        buffer = np.zeros(536870912, dtype=np.uint8)
 
-    if not length:
-        length = i
+        # Create views of the buffer with different data types
+        self.HEAP8 = buffer.view(np.int8)
+        self.HEAP16 = buffer.view(np.int16)
+        self.HEAP32 = buffer.view(np.int32)
+        self.HEAPU8 = buffer.view(np.uint8)
+        self.HEAPU16 = buffer.view(np.uint16)
+        self.HEAPU32 = buffer.view(np.uint32)
+        self.HEAPF32 = buffer.view(np.float32)
+        self.HEAPF64 = buffer.view(np.float64)
 
-    ret = ""
-    if hasUtf < 128:
-        MAX_CHUNK = 1024
-        while (length > 0):
-            curr = "".join(chr(HEAPU8[ptr + j]) for j in range(min(length, MAX_CHUNK)))
-            ret += curr
-            ptr += MAX_CHUNK
-            length -= MAX_CHUNK
-        return ret
-    
-    return UTF8ToString(ptr)
+    def lengthBytesUTF8(self, s):
+        return len(s.encode('utf-8')) 
+
+    def stringToUTF8Array(self, s, outU8Array, outIdx, maxBytesToWrite):
+        if not (maxBytesToWrite > 0):
+            return 0
+
+        utf8_bytes = s.encode('utf-8')
+        bytes_to_copy = min(len(utf8_bytes), maxBytesToWrite - 1)  # Leave space for the null terminator
+
+        # Copy the bytes to the output array
+        outU8Array[outIdx:outIdx + bytes_to_copy] = np.frombuffer(utf8_bytes[:bytes_to_copy], dtype=np.uint8)
+        outU8Array[outIdx + bytes_to_copy] = 0  # Null terminator
+
+        return bytes_to_copy
+
+    def UTF8ToString(self,ptr):
+        return self.UTF8ArrayToString(self.HEAPU8, ptr)
+
+    def UTF8ArrayToString(self):
+        pass
+
+    def Pointer_stringify(self, ptr, length=None):
+        if (length == 0 or  not ptr):
+            return ""
+        hasUtf = 0
+        i = 0
+        while True:
+            t = self.HEAPU8[ptr + i]
+            hasUtf |= t
+            if t == 0 and not length:
+                break
+            i += 1
+            if length and i == length:
+                break
+
+        if not length:
+            length = i
+
+        ret = ""
+        if hasUtf < 128:
+            MAX_CHUNK = 1024
+            while (length > 0):
+                curr = "".join(chr(self.HEAPU8[ptr + j]) for j in range(min(length, MAX_CHUNK)))
+                ret += curr
+                ptr += MAX_CHUNK
+                length -= MAX_CHUNK
+            return ret
+        
+        return self.UTF8ToString(ptr)
+
 ################################################################################
 # Example usage
 s = "Hello, 世界"
 out_idx = 0
 max_bytes_to_write = 100
-
-num_bytes = stringToUTF8Array(s, HEAPU8, out_idx, max_bytes_to_write)
+lok = LOK_JS2PY()
+num_bytes = lok.stringToUTF8Array(s, lok.HEAPU8, out_idx, max_bytes_to_write)
 print(num_bytes)  # Output should be the length in bytes
-print(HEAPU8[:num_bytes + 1])  # Output should contain the UTF-8 encoded string and null terminator
+print(lok.HEAPU8[:num_bytes + 1])  # Output should contain the UTF-8 encoded string and null terminator
 ptr = 1  # Assuming the string starts at index 0
-out = Pointer_stringify(ptr, 2)  # Output shoul
-
-################################################################################
-# The following section contains wasm function
-################################################################################
-def abort(param0):
-    print("abort not implemented")
-    return 
-
-def enlargeMemory():
-    print("enlargeMemory not implemented")
-    return 0
-
-def getTotalMemory():
-    print("getTotalMemory not implemented")
-    return 0
-
-def abortOnCannotGrowMemory():
-    print("abortOnCannotGrowMemory not implemented")
-    return 0
-
-def invoke_dddi(param0,param1,param2,param3):
-    print("invoke_dddi not implemented")
-    return 0
-
-def invoke_dii(param0,param1,param2):
-    print("invoke_dii not implemented")
-    return 0
-
-def invoke_diii(param0,param1,param2,param3):
-    print("invoke_diii not implemented")
-    return 0
-
-def invoke_diiid(param0,param1,param2,param3,param4):
-    print("invoke_diiid not implemented")
-    return 0
-
-def invoke_diiii(param0,param1,param2,param3,param4):
-    print("invoke_diiii not implemented")
-    return 0
-
-def invoke_ffffi(param0,param1,param2,param3,param4):
-    print("invoke_ffffi not implemented")
-    return 0
-
-def invoke_fffi(param0,param1,param2,param3):
-    print("invoke_fffi not implemented")
-    return 0
-
-def invoke_fi(param0,param1):
-    print("invoke_fi not implemented")
-    return 0
-
-def invoke_fii(param0,param1,param2):
-    print("invoke_fii not implemented")
-    return 0
-
-def invoke_fiifi(param0,param1,param2,param3,param4):
-    print("invoke_fiifi not implemented")
-    return 0
-
-def invoke_fiifii(param0,param1,param2,param3,param4,param5):
-    print("invoke_fiifii not implemented")
-    return 0
-
-def invoke_fiii(param0,param1,param2,param3):
-    print("invoke_fiii not implemented")
-    return 0
-
-def invoke_fiiif(param0,param1,param2,param3,param4):
-    print("invoke_fiiif not implemented")
-    return 0
-
-def invoke_fiiii(param0,param1,param2,param3,param4):
-    print("invoke_fiiii not implemented")
-    return 0
-
-def invoke_i(param0):
-    print("invoke_i not implemented")
-    return 0
-
-def invoke_ifi(param0,param1,param2):
-    print("invoke_ifi not implemented")
-    return 0
-
-def invoke_ii(param0,param1):
-    print("invoke_ii not implemented")
-    return 0
-
-def invoke_iifii(param0,param1,param2,param3,param4):
-    print("invoke_iifii not implemented")
-    return 0
-
-def invoke_iii(param0,param1,param2):
-    print("invoke_iii not implemented")
-    return 0
-
-def invoke_iiifi(param0,param1,param2,param3,param4):
-    print("invoke_iiifi not implemented")
-    return 0
-
-def invoke_iiii(param0,param1,param2,param3):
-    print("invoke_iiii not implemented")
-    return 0
-
-def invoke_iiiifii(param0,param1,param2,param3,param4,param5,param6):
-    print("invoke_iiiifii not implemented")
-    return 0
-
-def invoke_iiiii(param0,param1,param2,param3,param4):
-    print("invoke_iiiii not implemented")
-    return 0
-
-def invoke_iiiiii(param0,param1,param2,param3,param4,param5):
-    print("invoke_iiiiii not implemented")
-    return 0
-
-def invoke_iiiiiii(param0,param1,param2,param3,param4,param5,param6):
-    print("invoke_iiiiiii not implemented")
-    return 0
-
-def invoke_iiiiiiii(param0,param1,param2,param3,param4,param5,param6,param7):
-    print("invoke_iiiiiiii not implemented")
-    return 0
-
-def invoke_iiiiiiiii(param0,param1,param2,param3,param4,param5,param6,param7,param8):
-    print("invoke_iiiiiiiii not implemented")
-    return 0
-
-def invoke_iiiiiiiiii(param0,param1,param2,param3,param4,param5,param6,param7,param8,param9):
-    print("invoke_iiiiiiiiii not implemented")
-    return 0
-
-def invoke_iiiiiiiiiii(param0,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10):
-    print("invoke_iiiiiiiiiii not implemented")
-    return 0
-
-def invoke_v(param0):
-    print("invoke_v not implemented")
-    return 
-
-def invoke_vi(param0,param1):
-    print("invoke_vi not implemented")
-    return 
-
-def invoke_vidiii(param0,param1,param2,param3,param4,param5):
-    print("invoke_vidiii not implemented")
-    return 
-
-def invoke_vifffi(param0,param1,param2,param3,param4,param5):
-    print("invoke_vifffi not implemented")
-    return 
-
-def invoke_vifi(param0,param1,param2,param3):
-    print("invoke_vifi not implemented")
-    return 
-
-def invoke_vifii(param0,param1,param2,param3,param4):
-    print("invoke_vifii not implemented")
-    return 
-
-def invoke_vii(param0,param1,param2):
-    print("invoke_vii not implemented")
-    return 
-
-def invoke_viidi(param0,param1,param2,param3,param4):
-    print("invoke_viidi not implemented")
-    return 
-
-def invoke_viidii(param0,param1,param2,param3,param4,param5):
-    print("invoke_viidii not implemented")
-    return 
-
-def invoke_viiff(param0,param1,param2,param3,param4):
-    print("invoke_viiff not implemented")
-    return 
-
-def invoke_viiffi(param0,param1,param2,param3,param4,param5):
-    print("invoke_viiffi not implemented")
-    return 
-
-def invoke_viifi(param0,param1,param2,param3,param4):
-    print("invoke_viifi not implemented")
-    return 
-
-def invoke_viifii(param0,param1,param2,param3,param4,param5):
-    print("invoke_viifii not implemented")
-    return 
-
-def invoke_viii(param0,param1,param2,param3):
-    print("invoke_viii not implemented")
-    return 
-
-def invoke_viiif(param0,param1,param2,param3,param4):
-    print("invoke_viiif not implemented")
-    return 
-
-def invoke_viiii(param0,param1,param2,param3,param4):
-    print("invoke_viiii not implemented")
-    return 
-
-def invoke_viiiii(param0,param1,param2,param3,param4,param5):
-    print("invoke_viiiii not implemented")
-    return 
-
-def invoke_viiiiii(param0,param1,param2,param3,param4,param5,param6):
-    print("invoke_viiiiii not implemented")
-    return 
-
-def invoke_viiiiiii(param0,param1,param2,param3,param4,param5,param6,param7):
-    print("invoke_viiiiiii not implemented")
-    return 
-
-def invoke_viiiiiiifddfii(param0,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10,param11,param12,param13):
-    print("invoke_viiiiiiifddfii not implemented")
-    return 
-
-def invoke_viiiiiiiffffii(param0,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10,param11,param12,param13):
-    print("invoke_viiiiiiiffffii not implemented")
-    return 
-
-def invoke_viiiiiiifiifii(param0,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10,param11,param12,param13):
-    print("invoke_viiiiiiifiifii not implemented")
-    return 
-
-def invoke_viiiiiiii(param0,param1,param2,param3,param4,param5,param6,param7,param8):
-    print("invoke_viiiiiiii not implemented")
-    return 
-
-def invoke_viiiiiiiii(param0,param1,param2,param3,param4,param5,param6,param7,param8,param9):
-    print("invoke_viiiiiiiii not implemented")
-    return 
-
-def invoke_viiiiiiiiii(param0,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10):
-    print("invoke_viiiiiiiiii not implemented")
-    return 
-
-def _ES_AddEventHandler(param0,param1):
-    print("_ES_AddEventHandler not implemented")
-    return 
-
-def _ES_Close(param0):
-    print("_ES_Close not implemented")
-    return 
-
-def _ES_Create(param0,param1,param2,param3,param4):
-    print("_ES_Create not implemented")
-    return 0
-
-def _ES_IsSupported():
-    print("_ES_IsSupported not implemented")
-    return 0
-
-def _ES_Release(param0):
-    print("_ES_Release not implemented")
-    return 
-
-def _GetInputFieldSelectionEnd():
-    print("_GetInputFieldSelectionEnd not implemented")
-    return 0
-
-def _GetInputFieldSelectionStart():
-    print("_GetInputFieldSelectionStart not implemented")
-    return 0
-
-def _GetInputFieldValue():
-    print("_GetInputFieldValue not implemented")
-    return 0
-
-def _HideInputField():
-    print("_HideInputField not implemented")
-    return 
-
-def _IsInputFieldActive():
-    print("_IsInputFieldActive not implemented")
-    return 0
-
-def _JS_Cursor_SetImage(param0,param1):
-    print("_JS_Cursor_SetImage not implemented")
-    return 
-
-def _JS_Cursor_SetShow(param0):
-    print("_JS_Cursor_SetShow not implemented")
-    return 
-
-def _JS_Eval_ClearInterval(param0):
-    print("_JS_Eval_ClearInterval not implemented")
-    return 
-
-def _JS_Eval_OpenURL(param0):
-    print("_JS_Eval_OpenURL not implemented")
-    return 
-
-def _JS_Eval_SetInterval(param0,param1,param2):
-    print("_JS_Eval_SetInterval not implemented")
-    return 0
-
-def _JS_FileSystem_Initialize():
-    print("_JS_FileSystem_Initialize not implemented")
-    return 
-
-def _JS_FileSystem_Sync():
-    print("_JS_FileSystem_Sync not implemented")
-    return 
-
-def _JS_Log_Dump(param0,param1):
-    print("_JS_Log_Dump not implemented")
-    return 
-
-def _JS_Log_StackTrace(param0,param1):
-    print("_JS_Log_StackTrace not implemented")
-    return 
-
-def _JS_Sound_Create_Channel(param0,param1):
-    print("_JS_Sound_Create_Channel not implemented")
-    return 0
-
-def _JS_Sound_GetLength(param0):
-    print("_JS_Sound_GetLength not implemented")
-    return 0
-
-def _JS_Sound_GetLoadState(param0):
-    print("_JS_Sound_GetLoadState not implemented")
-    return 0
-
-def _JS_Sound_Init():
-    print("_JS_Sound_Init not implemented")
-    return 
-
-def _JS_Sound_Load(param0,param1):
-    print("_JS_Sound_Load not implemented")
-    return 0
-
-def _JS_Sound_Load_PCM(param0,param1,param2,param3):
-    print("_JS_Sound_Load_PCM not implemented")
-    return 0
-
-def _JS_Sound_Play(param0,param1,param2,param3):
-    print("_JS_Sound_Play not implemented")
-    return 
-
-def _JS_Sound_ReleaseInstance(param0):
-    print("_JS_Sound_ReleaseInstance not implemented")
-    return 0
-
-def _JS_Sound_ResumeIfNeeded():
-    print("_JS_Sound_ResumeIfNeeded not implemented")
-    return 
-
-def _JS_Sound_Set3D(param0,param1):
-    print("_JS_Sound_Set3D not implemented")
-    return 
-
-def _JS_Sound_SetListenerOrientation(param0,param1,param2,param3,param4,param5):
-    print("_JS_Sound_SetListenerOrientation not implemented")
-    return 
-
-def _JS_Sound_SetListenerPosition(param0,param1,param2):
-    print("_JS_Sound_SetListenerPosition not implemented")
-    return 
-
-def _JS_Sound_SetLoop(param0,param1):
-    print("_JS_Sound_SetLoop not implemented")
-    return 
-
-def _JS_Sound_SetLoopPoints(param0,param1,param2):
-    print("_JS_Sound_SetLoopPoints not implemented")
-    return 
-
-def _JS_Sound_SetPaused(param0,param1):
-    print("_JS_Sound_SetPaused not implemented")
-    return 
-
-def _JS_Sound_SetPitch(param0,param1):
-    print("_JS_Sound_SetPitch not implemented")
-    return 
-
-def _JS_Sound_SetPosition(param0,param1,param2,param3):
-    print("_JS_Sound_SetPosition not implemented")
-    return 
-
-def _JS_Sound_SetVolume(param0,param1):
-    print("_JS_Sound_SetVolume not implemented")
-    return 
-
-def _JS_Sound_Stop(param0,param1):
-    print("_JS_Sound_Stop not implemented")
-    return 
-
-def _JS_SystemInfo_GetBrowserName(param0,param1):
-    print("_JS_SystemInfo_GetBrowserName not implemented")
-    return 0
-
-def _JS_SystemInfo_GetBrowserVersionString(param0,param1):
-    print("_JS_SystemInfo_GetBrowserVersionString not implemented")
-    return 0
-
-def _JS_SystemInfo_GetCanvasClientSize(param0,param1,param2):
-    print("_JS_SystemInfo_GetCanvasClientSize not implemented")
-    return 
-
-def _JS_SystemInfo_GetDocumentURL(param0,param1):
-    print("_JS_SystemInfo_GetDocumentURL not implemented")
-    return 0
-
-def _JS_SystemInfo_GetGPUInfo(param0,param1):
-    print("_JS_SystemInfo_GetGPUInfo not implemented")
-    return 0
-
-def _JS_SystemInfo_GetLanguage(param0,param1):
-    print("_JS_SystemInfo_GetLanguage not implemented")
-    return 0
-
-def _JS_SystemInfo_GetMemory():
-    print("_JS_SystemInfo_GetMemory not implemented")
-    return 0
-
-def _JS_SystemInfo_GetOS(param0,param1):
-    print("_JS_SystemInfo_GetOS not implemented")
-    return 0
-
-def _JS_SystemInfo_GetPreferredDevicePixelRatio():
-    print("_JS_SystemInfo_GetPreferredDevicePixelRatio not implemented")
-    return 0
-
-def _JS_SystemInfo_GetScreenSize(param0,param1):
-    print("_JS_SystemInfo_GetScreenSize not implemented")
-    return 
-
-def _JS_SystemInfo_GetStreamingAssetsURL(param0,param1):
-    print("_JS_SystemInfo_GetStreamingAssetsURL not implemented")
-    return 0
-
-def _JS_SystemInfo_HasCursorLock():
-    print("_JS_SystemInfo_HasCursorLock not implemented")
-    return 0
-
-def _JS_SystemInfo_HasFullscreen():
-    print("_JS_SystemInfo_HasFullscreen not implemented")
-    return 0
-
-def _JS_SystemInfo_HasWebGL():
-    print("_JS_SystemInfo_HasWebGL not implemented")
-    return 0
-
-def _JS_SystemInfo_IsMobile():
-    print("_JS_SystemInfo_IsMobile not implemented")
-    return 0
-
-def _JS_Video_CanPlayFormat(param0):
-    print("_JS_Video_CanPlayFormat not implemented")
-    return 0
-
-def _JS_Video_Create(param0):
-    print("_JS_Video_Create not implemented")
-    return 0
-
-def _JS_Video_Destroy(param0):
-    print("_JS_Video_Destroy not implemented")
-    return 
-
-def _JS_Video_Duration(param0):
-    print("_JS_Video_Duration not implemented")
-    return 0
-
-def _JS_Video_EnableAudioTrack(param0,param1,param2):
-    print("_JS_Video_EnableAudioTrack not implemented")
-    return 
-
-def _JS_Video_GetAudioLanguageCode(param0,param1):
-    print("_JS_Video_GetAudioLanguageCode not implemented")
-    return 0
-
-def _JS_Video_GetNumAudioTracks(param0):
-    print("_JS_Video_GetNumAudioTracks not implemented")
-    return 0
-
-def _JS_Video_Height(param0):
-    print("_JS_Video_Height not implemented")
-    return 0
-
-def _JS_Video_IsPlaying(param0):
-    print("_JS_Video_IsPlaying not implemented")
-    return 0
-
-def _JS_Video_IsReady(param0):
-    print("_JS_Video_IsReady not implemented")
-    return 0
-
-def _JS_Video_Pause(param0):
-    print("_JS_Video_Pause not implemented")
-    return 
-
-def _JS_Video_Play(param0,param1):
-    print("_JS_Video_Play not implemented")
-    return 
-
-def _JS_Video_Seek(param0,param1):
-    print("_JS_Video_Seek not implemented")
-    return 
-
-def _JS_Video_SetEndedHandler(param0,param1,param2):
-    print("_JS_Video_SetEndedHandler not implemented")
-    return 
-
-def _JS_Video_SetErrorHandler(param0,param1,param2):
-    print("_JS_Video_SetErrorHandler not implemented")
-    return 
-
-def _JS_Video_SetLoop(param0,param1):
-    print("_JS_Video_SetLoop not implemented")
-    return 
-
-def _JS_Video_SetMute(param0,param1):
-    print("_JS_Video_SetMute not implemented")
-    return 
-
-def _JS_Video_SetPlaybackRate(param0,param1):
-    print("_JS_Video_SetPlaybackRate not implemented")
-    return 
-
-def _JS_Video_SetReadyHandler(param0,param1,param2):
-    print("_JS_Video_SetReadyHandler not implemented")
-    return 
-
-def _JS_Video_SetSeekedOnceHandler(param0,param1,param2):
-    print("_JS_Video_SetSeekedOnceHandler not implemented")
-    return 
-
-def _JS_Video_SetVolume(param0,param1):
-    print("_JS_Video_SetVolume not implemented")
-    return 
-
-def _JS_Video_Time(param0):
-    print("_JS_Video_Time not implemented")
-    return 0
-
-def _JS_Video_UpdateToTexture(param0,param1):
-    print("_JS_Video_UpdateToTexture not implemented")
-    return 0
-
-def _JS_Video_Width(param0):
-    print("_JS_Video_Width not implemented")
-    return 0
-
-def _JS_WebCamVideo_CanPlay(param0):
-    print("_JS_WebCamVideo_CanPlay not implemented")
-    return 0
-
-def _JS_WebCamVideo_GetDeviceName(param0,param1,param2):
-    print("_JS_WebCamVideo_GetDeviceName not implemented")
-    return 0
-
-def _JS_WebCamVideo_GetNativeHeight(param0):
-    print("_JS_WebCamVideo_GetNativeHeight not implemented")
-    return 0
-
-def _JS_WebCamVideo_GetNativeWidth(param0):
-    print("_JS_WebCamVideo_GetNativeWidth not implemented")
-    return 0
-
-def _JS_WebCamVideo_GetNumDevices():
-    print("_JS_WebCamVideo_GetNumDevices not implemented")
-    return 0
-
-def _JS_WebCamVideo_GrabFrame(param0,param1,param2,param3):
-    print("_JS_WebCamVideo_GrabFrame not implemented")
-    return 
-
-def _JS_WebCamVideo_Start(param0):
-    print("_JS_WebCamVideo_Start not implemented")
-    return 
-
-def _JS_WebCamVideo_Stop(param0):
-    print("_JS_WebCamVideo_Stop not implemented")
-    return 
-
-def _JS_WebCam_IsSupported():
-    print("_JS_WebCam_IsSupported not implemented")
-    return 0
-
-def _JS_WebRequest_Abort(param0):
-    print("_JS_WebRequest_Abort not implemented")
-    return 
-
-def _JS_WebRequest_Create(param0,param1):
-    print("_JS_WebRequest_Create not implemented")
-    return 0
-
-def _JS_WebRequest_GetResponseHeaders(param0,param1,param2):
-    print("_JS_WebRequest_GetResponseHeaders not implemented")
-    return 0
-
-def _JS_WebRequest_Release(param0):
-    print("_JS_WebRequest_Release not implemented")
-    return 
-
-def _JS_WebRequest_Send(param0,param1,param2):
-    print("_JS_WebRequest_Send not implemented")
-    return 
-
-def _JS_WebRequest_SetProgressHandler(param0,param1,param2):
-    print("_JS_WebRequest_SetProgressHandler not implemented")
-    return 
-
-def _JS_WebRequest_SetRequestHeader(param0,param1,param2):
-    print("_JS_WebRequest_SetRequestHeader not implemented")
-    return 
-
-def _JS_WebRequest_SetResponseHandler(param0,param1,param2):
-    print("_JS_WebRequest_SetResponseHandler not implemented")
-    return 
-
-def _JS_WebRequest_SetTimeout(param0,param1):
-    print("_JS_WebRequest_SetTimeout not implemented")
-    return 
-
-def _NativeCall(param0,param1):
-    print("_NativeCall not implemented")
-    return 
-
-def _SetInputFieldSelection(param0,param1):
-    print("_SetInputFieldSelection not implemented")
-    return 
-
-def _ShowInputField(param0):
-    print("_ShowInputField not implemented")
-    return 
-
-def _WS_Close(param0,param1,param2):
-    print("_WS_Close not implemented")
-    return 
-
-class WebSocketClientManager:
-    def __init__(self):
-        self.webSocketInstances = {}
-
-    @property
-    def nextInstanceId(self):
-        return len(self.webSocketInstances) +1
-    
-    def set(self, socket):
-        self.webSocketInstances[self.nextInstanceId] =socket
-        return self.nextInstanceId
-
-    def get(self, id):
-        return self.webSocketInstances[id]
-
-    def _callOnOpen(self, onOpen, id):
-        print('debug')
-        dynCall_vi(onOpen, id);
-
-    def _callOnBinary(self, onBinary, id, data):
-        byteArray = bytearray(data)
-        buffer = _malloc(len(byteArray))
-        HEAPU8.set(byteArray, buffer)
-        dynCall_viii(onBinary, id, buffer, len(byteArray))
-
-    def _callOnText(self, onText, id, data):
-        length = lengthBytesUTF8(data) + 1
-        buffer = _malloc(length)
-        stringToUTF8Array(data, HEAPU8, buffer, length)
-        dynCall_vii(onText, id, buffer)
-
-    def _callOnClose(self, onClose, id, code, reason):
-        length = lengthBytesUTF8(reason) + 1
-        buffer = _malloc(length)
-        stringToUTF8Array(reason, HEAPU8, buffer, length)
-        dynCall_viii(onClose, id, code, buffer)
-
-    def  _callOnError(errCallback, id, reason):
-        length = lengthBytesUTF8(reason) + 1
-        buffer = _malloc(length)
-        stringToUTF8Array(reason, HEAPU8, buffer, length)
-        dynCall_vii(errCallback, id, buffer)
-
-ws =WebSocketClientManager()
-import websocket
-import threading
-
-def _WS_Create(url, protocol, on_open, on_text, on_binary, on_error, on_close):
-    # urlStr = Pointer_stringify(url).replace('+', '%2B').replace('%252F', '%2F')
-    # proto = Pointer_stringify(protocol)
-    urlStr=  url
-    proto = ''
-    socket = {
-        'onError': on_error,
-        'onClose' : on_close,
-    }
-    socket_impl = websocket.WebSocketApp(urlStr, subprotocols=[proto] if proto else None)
-    socket_impl.binaryType = "arraybuffer";
-    _id = ws.nextInstanceId
-
-    def on_open_wrapper(ws1):
-        ws._callOnOpen(on_open, _id)
-
-    def on_message_wrapper(ws1, message):
-        if isinstance(message, (bytes, bytearray)):
-            ws._callOnBinary(on_binary, _id, message.data)
-        else:
-            ws._callOnText(on_text, _id, message.data)
-
-    def on_error_wrapper(ws1, error):
-        print(f"{_id} WS_Create - onError")
-
-    def on_close_wrapper(ws1, close_status_code, close_msg):
-        print(f"{_id} WS_Create - onClose {close_status_code} {close_msg}")
-        ws._callOnClose(on_close, _id, close_status_code, close_msg)
-
-    socket_impl.on_open = on_open_wrapper
-    socket_impl.on_message = on_message_wrapper
-    socket_impl.on_error = on_error_wrapper
-    socket_impl.on_close = on_close_wrapper
-
-    socket['socketImpl'] = socket_impl
-    socket_thread = threading.Thread(target=socket_impl.run_forever)
-    socket_thread.start()
-
-    return ws.set(socket)
-
-def _WS_GetBufferedAmount(param0):
-    print("_WS_GetBufferedAmount not implemented")
-    return 0
-
-def _WS_GetState(param0):
-    print("_WS_GetState not implemented")
-    return 0
-
-def _WS_Release(param0):
-    print("_WS_Release not implemented")
-    return 
-
-def _WS_Send_Binary(param0,param1,param2,param3):
-    print("_WS_Send_Binary not implemented")
-    return 0
-
-def _WS_Send_String(param0,param1):
-    print("_WS_Send_String not implemented")
-    return 0
-
-def _XHR_Abort(param0):
-    print("_XHR_Abort not implemented")
-    return 
-
-def _XHR_Create(param0,param1,param2,param3,param4):
-    print("_XHR_Create not implemented")
-    return 0
-
-def _XHR_GetResponseHeaders(param0,param1):
-    print("_XHR_GetResponseHeaders not implemented")
-    return 
-
-def _XHR_GetStatusLine(param0,param1):
-    print("_XHR_GetStatusLine not implemented")
-    return 
-
-def _XHR_Release(param0):
-    print("_XHR_Release not implemented")
-    return 
-
-def _XHR_Send(param0,param1,param2):
-    print("_XHR_Send not implemented")
-    return 
-
-def _XHR_SetLoglevel(param0):
-    print("_XHR_SetLoglevel not implemented")
-    return 
-
-def _XHR_SetProgressHandler(param0,param1,param2):
-    print("_XHR_SetProgressHandler not implemented")
-    return 
-
-def _XHR_SetRequestHeader(param0,param1,param2):
-    print("_XHR_SetRequestHeader not implemented")
-    return 
-
-def _XHR_SetResponseHandler(param0,param1,param2,param3,param4):
-    print("_XHR_SetResponseHandler not implemented")
-    return 
-
-def _XHR_SetTimeout(param0,param1):
-    print("_XHR_SetTimeout not implemented")
-    return 
-
-def ___buildEnvironment(param0):
-    print("___buildEnvironment not implemented")
-    return 
-
-def ___cxa_allocate_exception(param0):
-    print("___cxa_allocate_exception not implemented")
-    return 0
-
-def ___cxa_begin_catch(param0):
-    print("___cxa_begin_catch not implemented")
-    return 0
-
-def ___cxa_end_catch():
-    print("___cxa_end_catch not implemented")
-    return 
-
-def ___cxa_find_matching_catch_2():
-    print("___cxa_find_matching_catch_2 not implemented")
-    return 0
-
-def ___cxa_find_matching_catch_3(param0):
-    print("___cxa_find_matching_catch_3 not implemented")
-    return 0
-
-def ___cxa_find_matching_catch_4(param0,param1):
-    print("___cxa_find_matching_catch_4 not implemented")
-    return 0
-
-def ___cxa_free_exception(param0):
-    print("___cxa_free_exception not implemented")
-    return 
-
-def ___cxa_pure_virtual():
-    print("___cxa_pure_virtual not implemented")
-    return 
-
-def ___cxa_rethrow():
-    print("___cxa_rethrow not implemented")
-    return 
-
-def ___cxa_throw(param0,param1,param2):
-    print("___cxa_throw not implemented")
-    return 
-
-def ___lock(param0):
-    print("___lock not implemented")
-    return 
-
-def ___map_file(param0,param1):
-    print("___map_file not implemented")
-    return 0
-
-def ___resumeException(param0):
-    print("___resumeException not implemented")
-    return 
-
-def ___setErrNo(param0):
-    print("___setErrNo not implemented")
-    return 
-
-def ___syscall10(param0,param1):
-    print("___syscall10 not implemented")
-    return 0
-
-def ___syscall102(param0,param1):
-    print("___syscall102 not implemented")
-    return 0
-
-def ___syscall122(param0,param1):
-    print("___syscall122 not implemented")
-    return 0
-
-def ___syscall140(param0,param1):
-    print("___syscall140 not implemented")
-    return 0
-
-def ___syscall142(param0,param1):
-    print("___syscall142 not implemented")
-    return 0
-
-def ___syscall145(param0,param1):
-    print("___syscall145 not implemented")
-    return 0
-
-def ___syscall146(param0,param1):
-    print("___syscall146 not implemented")
-    return 0
-
-def ___syscall15(param0,param1):
-    print("___syscall15 not implemented")
-    return 0
-
-def ___syscall168(param0,param1):
-    print("___syscall168 not implemented")
-    return 0
-
-def ___syscall183(param0,param1):
-    print("___syscall183 not implemented")
-    return 0
-
-def ___syscall192(param0,param1):
-    print("___syscall192 not implemented")
-    return 0
-
-def ___syscall193(param0,param1):
-    print("___syscall193 not implemented")
-    return 0
-
-def ___syscall194(param0,param1):
-    print("___syscall194 not implemented")
-    return 0
-
-def ___syscall195(param0,param1):
-    print("___syscall195 not implemented")
-    return 0
-
-def ___syscall196(param0,param1):
-    print("___syscall196 not implemented")
-    return 0
-
-def ___syscall197(param0,param1):
-    print("___syscall197 not implemented")
-    return 0
-
-def ___syscall199(param0,param1):
-    print("___syscall199 not implemented")
-    return 0
-
-def ___syscall220(param0,param1):
-    print("___syscall220 not implemented")
-    return 0
-
-def ___syscall221(param0,param1):
-    print("___syscall221 not implemented")
-    return 0
-
-def ___syscall268(param0,param1):
-    print("___syscall268 not implemented")
-    return 0
-
-def ___syscall3(param0,param1):
-    print("___syscall3 not implemented")
-    return 0
-
-def ___syscall33(param0,param1):
-    print("___syscall33 not implemented")
-    return 0
-
-def ___syscall38(param0,param1):
-    print("___syscall38 not implemented")
-    return 0
-
-def ___syscall39(param0,param1):
-    print("___syscall39 not implemented")
-    return 0
-
-def ___syscall4(param0,param1):
-    print("___syscall4 not implemented")
-    return 0
-
-def ___syscall40(param0,param1):
-    print("___syscall40 not implemented")
-    return 0
-
-def ___syscall42(param0,param1):
-    print("___syscall42 not implemented")
-    return 0
-
-def ___syscall5(param0,param1):
-    print("___syscall5 not implemented")
-    return 0
-
-def ___syscall54(param0,param1):
-    print("___syscall54 not implemented")
-    return 0
-
-def ___syscall6(param0,param1):
-    print("___syscall6 not implemented")
-    return 0
-
-def ___syscall63(param0,param1):
-    print("___syscall63 not implemented")
-    return 0
-
-def ___syscall77(param0,param1):
-    print("___syscall77 not implemented")
-    return 0
-
-def ___syscall85(param0,param1):
-    print("___syscall85 not implemented")
-    return 0
-
-def ___syscall91(param0,param1):
-    print("___syscall91 not implemented")
-    return 0
-
-def ___unlock(param0):
-    print("___unlock not implemented")
-    return 
-
-def _abort():
-    print("_abort not implemented")
-    return 
-
-def _atexit(param0):
-    print("_atexit not implemented")
-    return 0
-
-def _clock():
-    print("_clock not implemented")
-    return 0
-
-def _clock_getres(param0,param1):
-    print("_clock_getres not implemented")
-    return 0
-
-def _clock_gettime(param0,param1):
-    print("_clock_gettime not implemented")
-    return 0
-
-def _difftime(param0,param1):
-    print("_difftime not implemented")
-    return 0
-
-def _dlclose(param0):
-    print("_dlclose not implemented")
-    return 0
-
-def _dlopen(param0,param1):
-    print("_dlopen not implemented")
-    return 0
-
-def _dlsym(param0,param1):
-    print("_dlsym not implemented")
-    return 0
-
-def _emscripten_asm_const_i(param0):
-    print("_emscripten_asm_const_i not implemented")
-    return 0
-
-def _emscripten_asm_const_sync_on_main_thread_i(param0):
-    print("_emscripten_asm_const_sync_on_main_thread_i not implemented")
-    return 0
-
-def _emscripten_cancel_main_loop():
-    print("_emscripten_cancel_main_loop not implemented")
-    return 
-
-def _emscripten_exit_fullscreen():
-    print("_emscripten_exit_fullscreen not implemented")
-    return 0
-
-def _emscripten_exit_pointerlock():
-    print("_emscripten_exit_pointerlock not implemented")
-    return 0
-
-def _emscripten_get_canvas_element_size(param0,param1,param2):
-    print("_emscripten_get_canvas_element_size not implemented")
-    return 0
-
-def _emscripten_get_fullscreen_status(param0):
-    print("_emscripten_get_fullscreen_status not implemented")
-    return 0
-
-def _emscripten_get_gamepad_status(param0,param1):
-    print("_emscripten_get_gamepad_status not implemented")
-    return 0
-
-def _emscripten_get_main_loop_timing(param0,param1):
-    print("_emscripten_get_main_loop_timing not implemented")
-    return 
-
-def _emscripten_get_now():
-    print("_emscripten_get_now not implemented")
-    return 0
-
-def _emscripten_get_num_gamepads():
-    print("_emscripten_get_num_gamepads not implemented")
-    return 0
-
-def _emscripten_has_threading_support():
-    print("_emscripten_has_threading_support not implemented")
-    return 0
-
-def _emscripten_html5_remove_all_event_listeners():
-    print("_emscripten_html5_remove_all_event_listeners not implemented")
-    return 
-
-def _emscripten_is_webgl_context_lost(param0):
-    print("_emscripten_is_webgl_context_lost not implemented")
-    return 0
-
-def _emscripten_log(param0,param1):
-    print("_emscripten_log not implemented")
-    return 
-
-def _emscripten_longjmp(param0,param1):
-    print("_emscripten_longjmp not implemented")
-    return 
-
-def _emscripten_memcpy_big(param0,param1,param2):
-    print("_emscripten_memcpy_big not implemented")
-    return 0
-
-def _emscripten_num_logical_cores():
-    print("_emscripten_num_logical_cores not implemented")
-    return 0
-
-def _emscripten_request_fullscreen(param0,param1):
-    print("_emscripten_request_fullscreen not implemented")
-    return 0
-
-def _emscripten_request_pointerlock(param0,param1):
-    print("_emscripten_request_pointerlock not implemented")
-    return 0
-
-def _emscripten_set_blur_callback_on_thread(param0,param1,param2,param3,param4):
-    print("_emscripten_set_blur_callback_on_thread not implemented")
-    return 0
-
-def _emscripten_set_canvas_element_size(param0,param1,param2):
-    print("_emscripten_set_canvas_element_size not implemented")
-    return 0
-
-def _emscripten_set_dblclick_callback_on_thread(param0,param1,param2,param3,param4):
-    print("_emscripten_set_dblclick_callback_on_thread not implemented")
-    return 0
-
-def _emscripten_set_devicemotion_callback_on_thread(param0,param1,param2,param3):
-    print("_emscripten_set_devicemotion_callback_on_thread not implemented")
-    return 0
-
-def _emscripten_set_deviceorientation_callback_on_thread(param0,param1,param2,param3):
-    print("_emscripten_set_deviceorientation_callback_on_thread not implemented")
-    return 0
-
-def _emscripten_set_focus_callback_on_thread(param0,param1,param2,param3,param4):
-    print("_emscripten_set_focus_callback_on_thread not implemented")
-    return 0
-
-def _emscripten_set_fullscreenchange_callback_on_thread(param0,param1,param2,param3,param4):
-    print("_emscripten_set_fullscreenchange_callback_on_thread not implemented")
-    return 0
-
-def _emscripten_set_gamepadconnected_callback_on_thread(param0,param1,param2,param3):
-    print("_emscripten_set_gamepadconnected_callback_on_thread not implemented")
-    return 0
-
-def _emscripten_set_gamepaddisconnected_callback_on_thread(param0,param1,param2,param3):
-    print("_emscripten_set_gamepaddisconnected_callback_on_thread not implemented")
-    return 0
-
-def _emscripten_set_keydown_callback_on_thread(param0,param1,param2,param3,param4):
-    print("_emscripten_set_keydown_callback_on_thread not implemented")
-    return 0
-
-def _emscripten_set_keypress_callback_on_thread(param0,param1,param2,param3,param4):
-    print("_emscripten_set_keypress_callback_on_thread not implemented")
-    return 0
-
-def _emscripten_set_keyup_callback_on_thread(param0,param1,param2,param3,param4):
-    print("_emscripten_set_keyup_callback_on_thread not implemented")
-    return 0
-
-def _emscripten_set_main_loop(param0,param1,param2):
-    print("_emscripten_set_main_loop not implemented")
-    return 
-
-def _emscripten_set_main_loop_timing(param0,param1):
-    print("_emscripten_set_main_loop_timing not implemented")
-    return 0
-
-def _emscripten_set_mousedown_callback_on_thread(param0,param1,param2,param3,param4):
-    print("_emscripten_set_mousedown_callback_on_thread not implemented")
-    return 0
-
-def _emscripten_set_mousemove_callback_on_thread(param0,param1,param2,param3,param4):
-    print("_emscripten_set_mousemove_callback_on_thread not implemented")
-    return 0
-
-def _emscripten_set_mouseup_callback_on_thread(param0,param1,param2,param3,param4):
-    print("_emscripten_set_mouseup_callback_on_thread not implemented")
-    return 0
-
-def _emscripten_set_touchcancel_callback_on_thread(param0,param1,param2,param3,param4):
-    print("_emscripten_set_touchcancel_callback_on_thread not implemented")
-    return 0
-
-def _emscripten_set_touchend_callback_on_thread(param0,param1,param2,param3,param4):
-    print("_emscripten_set_touchend_callback_on_thread not implemented")
-    return 0
-
-def _emscripten_set_touchmove_callback_on_thread(param0,param1,param2,param3,param4):
-    print("_emscripten_set_touchmove_callback_on_thread not implemented")
-    return 0
-
-def _emscripten_set_touchstart_callback_on_thread(param0,param1,param2,param3,param4):
-    print("_emscripten_set_touchstart_callback_on_thread not implemented")
-    return 0
-
-def _emscripten_set_wheel_callback_on_thread(param0,param1,param2,param3,param4):
-    print("_emscripten_set_wheel_callback_on_thread not implemented")
-    return 0
-
-def _emscripten_webgl_create_context(param0,param1):
-    print("_emscripten_webgl_create_context not implemented")
-    return 0
-
-def _emscripten_webgl_destroy_context(param0):
-    print("_emscripten_webgl_destroy_context not implemented")
-    return 0
-
-def _emscripten_webgl_enable_extension(param0,param1):
-    print("_emscripten_webgl_enable_extension not implemented")
-    return 0
-
-def _emscripten_webgl_get_current_context():
-    print("_emscripten_webgl_get_current_context not implemented")
-    return 0
-
-def _emscripten_webgl_init_context_attributes(param0):
-    print("_emscripten_webgl_init_context_attributes not implemented")
-    return 
-
-def _emscripten_webgl_make_context_current(param0):
-    print("_emscripten_webgl_make_context_current not implemented")
-    return 0
-
-def _exit(param0):
-    print("_exit not implemented")
-    return 
-
-def _flock(param0,param1):
-    print("_flock not implemented")
-    return 0
-
-def _getaddrinfo(param0,param1,param2,param3):
-    print("_getaddrinfo not implemented")
-    return 0
-
-def _getenv(param0):
-    print("_getenv not implemented")
-    return 0
-
-def _gethostbyaddr(param0,param1,param2):
-    print("_gethostbyaddr not implemented")
-    return 0
-
-def _gethostbyname(param0):
-    print("_gethostbyname not implemented")
-    return 0
-
-def _getnameinfo(param0,param1,param2,param3,param4,param5,param6):
-    print("_getnameinfo not implemented")
-    return 0
-
-def _getpagesize():
-    print("_getpagesize not implemented")
-    return 0
-
-def _getpwuid(param0):
-    print("_getpwuid not implemented")
-    return 0
-
-def _gettimeofday(param0,param1):
-    print("_gettimeofday not implemented")
-    return 0
-
-def _glActiveTexture(param0):
-    print("_glActiveTexture not implemented")
-    return 
-
-def _glAttachShader(param0,param1):
-    print("_glAttachShader not implemented")
-    return 
-
-def _glBeginQuery(param0,param1):
-    print("_glBeginQuery not implemented")
-    return 
-
-def _glBeginTransformFeedback(param0):
-    print("_glBeginTransformFeedback not implemented")
-    return 
-
-def _glBindAttribLocation(param0,param1,param2):
-    print("_glBindAttribLocation not implemented")
-    return 
-
-def _glBindBuffer(param0,param1):
-    print("_glBindBuffer not implemented")
-    return 
-
-def _glBindBufferBase(param0,param1,param2):
-    print("_glBindBufferBase not implemented")
-    return 
-
-def _glBindBufferRange(param0,param1,param2,param3,param4):
-    print("_glBindBufferRange not implemented")
-    return 
-
-def _glBindFramebuffer(param0,param1):
-    print("_glBindFramebuffer not implemented")
-    return 
-
-def _glBindRenderbuffer(param0,param1):
-    print("_glBindRenderbuffer not implemented")
-    return 
-
-def _glBindSampler(param0,param1):
-    print("_glBindSampler not implemented")
-    return 
-
-def _glBindTexture(param0,param1):
-    print("_glBindTexture not implemented")
-    return 
-
-def _glBindTransformFeedback(param0,param1):
-    print("_glBindTransformFeedback not implemented")
-    return 
-
-def _glBindVertexArray(param0):
-    print("_glBindVertexArray not implemented")
-    return 
-
-def _glBlendEquation(param0):
-    print("_glBlendEquation not implemented")
-    return 
-
-def _glBlendEquationSeparate(param0,param1):
-    print("_glBlendEquationSeparate not implemented")
-    return 
-
-def _glBlendFuncSeparate(param0,param1,param2,param3):
-    print("_glBlendFuncSeparate not implemented")
-    return 
-
-def _glBlitFramebuffer(param0,param1,param2,param3,param4,param5,param6,param7,param8,param9):
-    print("_glBlitFramebuffer not implemented")
-    return 
-
-def _glBufferData(param0,param1,param2,param3):
-    print("_glBufferData not implemented")
-    return 
-
-def _glBufferSubData(param0,param1,param2,param3):
-    print("_glBufferSubData not implemented")
-    return 
-
-def _glCheckFramebufferStatus(param0):
-    print("_glCheckFramebufferStatus not implemented")
-    return 0
-
-def _glClear(param0):
-    print("_glClear not implemented")
-    return 
-
-def _glClearBufferfi(param0,param1,param2,param3):
-    print("_glClearBufferfi not implemented")
-    return 
-
-def _glClearBufferfv(param0,param1,param2):
-    print("_glClearBufferfv not implemented")
-    return 
-
-def _glClearBufferuiv(param0,param1,param2):
-    print("_glClearBufferuiv not implemented")
-    return 
-
-def _glClearColor(param0,param1,param2,param3):
-    print("_glClearColor not implemented")
-    return 
-
-def _glClearDepthf(param0):
-    print("_glClearDepthf not implemented")
-    return 
-
-def _glClearStencil(param0):
-    print("_glClearStencil not implemented")
-    return 
-
-def _glColorMask(param0,param1,param2,param3):
-    print("_glColorMask not implemented")
-    return 
-
-def _glCompileShader(param0):
-    print("_glCompileShader not implemented")
-    return 
-
-def _glCompressedTexImage2D(param0,param1,param2,param3,param4,param5,param6,param7):
-    print("_glCompressedTexImage2D not implemented")
-    return 
-
-def _glCompressedTexSubImage2D(param0,param1,param2,param3,param4,param5,param6,param7,param8):
-    print("_glCompressedTexSubImage2D not implemented")
-    return 
-
-def _glCompressedTexSubImage3D(param0,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10):
-    print("_glCompressedTexSubImage3D not implemented")
-    return 
-
-def _glCopyBufferSubData(param0,param1,param2,param3,param4):
-    print("_glCopyBufferSubData not implemented")
-    return 
-
-def _glCopyTexImage2D(param0,param1,param2,param3,param4,param5,param6,param7):
-    print("_glCopyTexImage2D not implemented")
-    return 
-
-def _glCopyTexSubImage2D(param0,param1,param2,param3,param4,param5,param6,param7):
-    print("_glCopyTexSubImage2D not implemented")
-    return 
-
-def _glCreateProgram():
-    print("_glCreateProgram not implemented")
-    return 0
-
-def _glCreateShader(param0):
-    print("_glCreateShader not implemented")
-    return 0
-
-def _glCullFace(param0):
-    print("_glCullFace not implemented")
-    return 
-
-def _glDeleteBuffers(param0,param1):
-    print("_glDeleteBuffers not implemented")
-    return 
-
-def _glDeleteFramebuffers(param0,param1):
-    print("_glDeleteFramebuffers not implemented")
-    return 
-
-def _glDeleteProgram(param0):
-    print("_glDeleteProgram not implemented")
-    return 
-
-def _glDeleteQueries(param0,param1):
-    print("_glDeleteQueries not implemented")
-    return 
-
-def _glDeleteRenderbuffers(param0,param1):
-    print("_glDeleteRenderbuffers not implemented")
-    return 
-
-def _glDeleteSamplers(param0,param1):
-    print("_glDeleteSamplers not implemented")
-    return 
-
-def _glDeleteShader(param0):
-    print("_glDeleteShader not implemented")
-    return 
-
-def _glDeleteSync(param0):
-    print("_glDeleteSync not implemented")
-    return 
-
-def _glDeleteTextures(param0,param1):
-    print("_glDeleteTextures not implemented")
-    return 
-
-def _glDeleteTransformFeedbacks(param0,param1):
-    print("_glDeleteTransformFeedbacks not implemented")
-    return 
-
-def _glDeleteVertexArrays(param0,param1):
-    print("_glDeleteVertexArrays not implemented")
-    return 
-
-def _glDepthFunc(param0):
-    print("_glDepthFunc not implemented")
-    return 
-
-def _glDepthMask(param0):
-    print("_glDepthMask not implemented")
-    return 
-
-def _glDetachShader(param0,param1):
-    print("_glDetachShader not implemented")
-    return 
-
-def _glDisable(param0):
-    print("_glDisable not implemented")
-    return 
-
-def _glDisableVertexAttribArray(param0):
-    print("_glDisableVertexAttribArray not implemented")
-    return 
-
-def _glDrawArrays(param0,param1,param2):
-    print("_glDrawArrays not implemented")
-    return 
-
-def _glDrawArraysInstanced(param0,param1,param2,param3):
-    print("_glDrawArraysInstanced not implemented")
-    return 
-
-def _glDrawBuffers(param0,param1):
-    print("_glDrawBuffers not implemented")
-    return 
-
-def _glDrawElements(param0,param1,param2,param3):
-    print("_glDrawElements not implemented")
-    return 
-
-def _glDrawElementsInstanced(param0,param1,param2,param3,param4):
-    print("_glDrawElementsInstanced not implemented")
-    return 
-
-def _glEnable(param0):
-    print("_glEnable not implemented")
-    return 
-
-def _glEnableVertexAttribArray(param0):
-    print("_glEnableVertexAttribArray not implemented")
-    return 
-
-def _glEndQuery(param0):
-    print("_glEndQuery not implemented")
-    return 
-
-def _glEndTransformFeedback():
-    print("_glEndTransformFeedback not implemented")
-    return 
-
-def _glFenceSync(param0,param1):
-    print("_glFenceSync not implemented")
-    return 0
-
-def _glFinish():
-    print("_glFinish not implemented")
-    return 
-
-def _glFlush():
-    print("_glFlush not implemented")
-    return 
-
-def _glFlushMappedBufferRange(param0,param1,param2):
-    print("_glFlushMappedBufferRange not implemented")
-    return 
-
-def _glFramebufferRenderbuffer(param0,param1,param2,param3):
-    print("_glFramebufferRenderbuffer not implemented")
-    return 
-
-def _glFramebufferTexture2D(param0,param1,param2,param3,param4):
-    print("_glFramebufferTexture2D not implemented")
-    return 
-
-def _glFramebufferTextureLayer(param0,param1,param2,param3,param4):
-    print("_glFramebufferTextureLayer not implemented")
-    return 
-
-def _glFrontFace(param0):
-    print("_glFrontFace not implemented")
-    return 
-
-def _glGenBuffers(param0,param1):
-    print("_glGenBuffers not implemented")
-    return 
-
-def _glGenFramebuffers(param0,param1):
-    print("_glGenFramebuffers not implemented")
-    return 
-
-def _glGenQueries(param0,param1):
-    print("_glGenQueries not implemented")
-    return 
-
-def _glGenRenderbuffers(param0,param1):
-    print("_glGenRenderbuffers not implemented")
-    return 
-
-def _glGenSamplers(param0,param1):
-    print("_glGenSamplers not implemented")
-    return 
-
-def _glGenTextures(param0,param1):
-    print("_glGenTextures not implemented")
-    return 
-
-def _glGenTransformFeedbacks(param0,param1):
-    print("_glGenTransformFeedbacks not implemented")
-    return 
-
-def _glGenVertexArrays(param0,param1):
-    print("_glGenVertexArrays not implemented")
-    return 
-
-def _glGenerateMipmap(param0):
-    print("_glGenerateMipmap not implemented")
-    return 
-
-def _glGetActiveAttrib(param0,param1,param2,param3,param4,param5,param6):
-    print("_glGetActiveAttrib not implemented")
-    return 
-
-def _glGetActiveUniform(param0,param1,param2,param3,param4,param5,param6):
-    print("_glGetActiveUniform not implemented")
-    return 
-
-def _glGetActiveUniformBlockName(param0,param1,param2,param3,param4):
-    print("_glGetActiveUniformBlockName not implemented")
-    return 
-
-def _glGetActiveUniformBlockiv(param0,param1,param2,param3):
-    print("_glGetActiveUniformBlockiv not implemented")
-    return 
-
-def _glGetActiveUniformsiv(param0,param1,param2,param3,param4):
-    print("_glGetActiveUniformsiv not implemented")
-    return 
-
-def _glGetAttribLocation(param0,param1):
-    print("_glGetAttribLocation not implemented")
-    return 0
-
-def _glGetError():
-    print("_glGetError not implemented")
-    return 0
-
-def _glGetFramebufferAttachmentParameteriv(param0,param1,param2,param3):
-    print("_glGetFramebufferAttachmentParameteriv not implemented")
-    return 
-
-def _glGetIntegeri_v(param0,param1,param2):
-    print("_glGetIntegeri_v not implemented")
-    return 
-
-def _glGetIntegerv(param0,param1):
-    print("_glGetIntegerv not implemented")
-    return 
-
-def _glGetInternalformativ(param0,param1,param2,param3,param4):
-    print("_glGetInternalformativ not implemented")
-    return 
-
-def _glGetProgramBinary(param0,param1,param2,param3,param4):
-    print("_glGetProgramBinary not implemented")
-    return 
-
-def _glGetProgramInfoLog(param0,param1,param2,param3):
-    print("_glGetProgramInfoLog not implemented")
-    return 
-
-def _glGetProgramiv(param0,param1,param2):
-    print("_glGetProgramiv not implemented")
-    return 
-
-def _glGetRenderbufferParameteriv(param0,param1,param2):
-    print("_glGetRenderbufferParameteriv not implemented")
-    return 
-
-def _glGetShaderInfoLog(param0,param1,param2,param3):
-    print("_glGetShaderInfoLog not implemented")
-    return 
-
-def _glGetShaderPrecisionFormat(param0,param1,param2,param3):
-    print("_glGetShaderPrecisionFormat not implemented")
-    return 
-
-def _glGetShaderSource(param0,param1,param2,param3):
-    print("_glGetShaderSource not implemented")
-    return 
-
-def _glGetShaderiv(param0,param1,param2):
-    print("_glGetShaderiv not implemented")
-    return 
-
-def _glGetString(param0):
-    print("_glGetString not implemented")
-    return 0
-
-def _glGetStringi(param0,param1):
-    print("_glGetStringi not implemented")
-    return 0
-
-def _glGetTexParameteriv(param0,param1,param2):
-    print("_glGetTexParameteriv not implemented")
-    return 
-
-def _glGetUniformBlockIndex(param0,param1):
-    print("_glGetUniformBlockIndex not implemented")
-    return 0
-
-def _glGetUniformIndices(param0,param1,param2,param3):
-    print("_glGetUniformIndices not implemented")
-    return 
-
-def _glGetUniformLocation(param0,param1):
-    print("_glGetUniformLocation not implemented")
-    return 0
-
-def _glGetUniformiv(param0,param1,param2):
-    print("_glGetUniformiv not implemented")
-    return 
-
-def _glGetVertexAttribiv(param0,param1,param2):
-    print("_glGetVertexAttribiv not implemented")
-    return 
-
-def _glInvalidateFramebuffer(param0,param1,param2):
-    print("_glInvalidateFramebuffer not implemented")
-    return 
-
-def _glIsEnabled(param0):
-    print("_glIsEnabled not implemented")
-    return 0
-
-def _glIsVertexArray(param0):
-    print("_glIsVertexArray not implemented")
-    return 0
-
-def _glLinkProgram(param0):
-    print("_glLinkProgram not implemented")
-    return 
-
-def _glMapBufferRange(param0,param1,param2,param3):
-    print("_glMapBufferRange not implemented")
-    return 0
-
-def _glPixelStorei(param0,param1):
-    print("_glPixelStorei not implemented")
-    return 
-
-def _glPolygonOffset(param0,param1):
-    print("_glPolygonOffset not implemented")
-    return 
-
-def _glProgramBinary(param0,param1,param2,param3):
-    print("_glProgramBinary not implemented")
-    return 
-
-def _glProgramParameteri(param0,param1,param2):
-    print("_glProgramParameteri not implemented")
-    return 
-
-def _glReadBuffer(param0):
-    print("_glReadBuffer not implemented")
-    return 
-
-def _glReadPixels(param0,param1,param2,param3,param4,param5,param6):
-    print("_glReadPixels not implemented")
-    return 
-
-def _glRenderbufferStorage(param0,param1,param2,param3):
-    print("_glRenderbufferStorage not implemented")
-    return 
-
-def _glRenderbufferStorageMultisample(param0,param1,param2,param3,param4):
-    print("_glRenderbufferStorageMultisample not implemented")
-    return 
-
-def _glSamplerParameteri(param0,param1,param2):
-    print("_glSamplerParameteri not implemented")
-    return 
-
-def _glScissor(param0,param1,param2,param3):
-    print("_glScissor not implemented")
-    return 
-
-def _glShaderSource(param0,param1,param2,param3):
-    print("_glShaderSource not implemented")
-    return 
-
-def _glStencilFuncSeparate(param0,param1,param2,param3):
-    print("_glStencilFuncSeparate not implemented")
-    return 
-
-def _glStencilMask(param0):
-    print("_glStencilMask not implemented")
-    return 
-
-def _glStencilOpSeparate(param0,param1,param2,param3):
-    print("_glStencilOpSeparate not implemented")
-    return 
-
-def _glTexImage2D(param0,param1,param2,param3,param4,param5,param6,param7,param8):
-    print("_glTexImage2D not implemented")
-    return 
-
-def _glTexImage3D(param0,param1,param2,param3,param4,param5,param6,param7,param8,param9):
-    print("_glTexImage3D not implemented")
-    return 
-
-def _glTexParameterf(param0,param1,param2):
-    print("_glTexParameterf not implemented")
-    return 
-
-def _glTexParameteri(param0,param1,param2):
-    print("_glTexParameteri not implemented")
-    return 
-
-def _glTexParameteriv(param0,param1,param2):
-    print("_glTexParameteriv not implemented")
-    return 
-
-def _glTexStorage2D(param0,param1,param2,param3,param4):
-    print("_glTexStorage2D not implemented")
-    return 
-
-def _glTexStorage3D(param0,param1,param2,param3,param4,param5):
-    print("_glTexStorage3D not implemented")
-    return 
-
-def _glTexSubImage2D(param0,param1,param2,param3,param4,param5,param6,param7,param8):
-    print("_glTexSubImage2D not implemented")
-    return 
-
-def _glTexSubImage3D(param0,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10):
-    print("_glTexSubImage3D not implemented")
-    return 
-
-def _glTransformFeedbackVaryings(param0,param1,param2,param3):
-    print("_glTransformFeedbackVaryings not implemented")
-    return 
-
-def _glUniform1fv(param0,param1,param2):
-    print("_glUniform1fv not implemented")
-    return 
-
-def _glUniform1i(param0,param1):
-    print("_glUniform1i not implemented")
-    return 
-
-def _glUniform1iv(param0,param1,param2):
-    print("_glUniform1iv not implemented")
-    return 
-
-def _glUniform1uiv(param0,param1,param2):
-    print("_glUniform1uiv not implemented")
-    return 
-
-def _glUniform2fv(param0,param1,param2):
-    print("_glUniform2fv not implemented")
-    return 
-
-def _glUniform2iv(param0,param1,param2):
-    print("_glUniform2iv not implemented")
-    return 
-
-def _glUniform2uiv(param0,param1,param2):
-    print("_glUniform2uiv not implemented")
-    return 
-
-def _glUniform3fv(param0,param1,param2):
-    print("_glUniform3fv not implemented")
-    return 
-
-def _glUniform3iv(param0,param1,param2):
-    print("_glUniform3iv not implemented")
-    return 
-
-def _glUniform3uiv(param0,param1,param2):
-    print("_glUniform3uiv not implemented")
-    return 
-
-def _glUniform4fv(param0,param1,param2):
-    print("_glUniform4fv not implemented")
-    return 
-
-def _glUniform4iv(param0,param1,param2):
-    print("_glUniform4iv not implemented")
-    return 
-
-def _glUniform4uiv(param0,param1,param2):
-    print("_glUniform4uiv not implemented")
-    return 
-
-def _glUniformBlockBinding(param0,param1,param2):
-    print("_glUniformBlockBinding not implemented")
-    return 
-
-def _glUniformMatrix3fv(param0,param1,param2,param3):
-    print("_glUniformMatrix3fv not implemented")
-    return 
-
-def _glUniformMatrix4fv(param0,param1,param2,param3):
-    print("_glUniformMatrix4fv not implemented")
-    return 
-
-def _glUnmapBuffer(param0):
-    print("_glUnmapBuffer not implemented")
-    return 0
-
-def _glUseProgram(param0):
-    print("_glUseProgram not implemented")
-    return 
-
-def _glValidateProgram(param0):
-    print("_glValidateProgram not implemented")
-    return 
-
-def _glVertexAttrib4f(param0,param1,param2,param3,param4):
-    print("_glVertexAttrib4f not implemented")
-    return 
-
-def _glVertexAttrib4fv(param0,param1):
-    print("_glVertexAttrib4fv not implemented")
-    return 
-
-def _glVertexAttribIPointer(param0,param1,param2,param3,param4):
-    print("_glVertexAttribIPointer not implemented")
-    return 
-
-def _glVertexAttribPointer(param0,param1,param2,param3,param4,param5):
-    print("_glVertexAttribPointer not implemented")
-    return 
-
-def _glViewport(param0,param1,param2,param3):
-    print("_glViewport not implemented")
-    return 
-
-def _gmtime(param0):
-    print("_gmtime not implemented")
-    return 0
-
-def _inet_addr(param0):
-    print("_inet_addr not implemented")
-    return 0
-
-def _llvm_eh_typeid_for(param0):
-    print("_llvm_eh_typeid_for not implemented")
-    return 0
-
-def _llvm_exp2_f32(param0):
-    print("_llvm_exp2_f32 not implemented")
-    return 0
-
-def _llvm_log10_f32(param0):
-    print("_llvm_log10_f32 not implemented")
-    return 0
-
-def _llvm_log10_f64(param0):
-    print("_llvm_log10_f64 not implemented")
-    return 0
-
-def _llvm_log2_f32(param0):
-    print("_llvm_log2_f32 not implemented")
-    return 0
-
-def _llvm_trap():
-    print("_llvm_trap not implemented")
-    return 
-
-def _llvm_trunc_f32(param0):
-    print("_llvm_trunc_f32 not implemented")
-    return 0
-
-def _localtime(param0):
-    print("_localtime not implemented")
-    return 0
-
-def _longjmp(param0,param1):
-    print("_longjmp not implemented")
-    return 
-
-def _mktime(param0):
-    print("_mktime not implemented")
-    return 0
-
-def _pthread_cond_destroy(param0):
-    print("_pthread_cond_destroy not implemented")
-    return 0
-
-def _pthread_cond_init(param0,param1):
-    print("_pthread_cond_init not implemented")
-    return 0
-
-def _pthread_cond_timedwait(param0,param1,param2):
-    print("_pthread_cond_timedwait not implemented")
-    return 0
-
-def _pthread_cond_wait(param0,param1):
-    print("_pthread_cond_wait not implemented")
-    return 0
-
-def _pthread_getspecific(param0):
-    print("_pthread_getspecific not implemented")
-    return 0
-
-def _pthread_key_create(param0,param1):
-    print("_pthread_key_create not implemented")
-    return 0
-
-def _pthread_key_delete(param0):
-    print("_pthread_key_delete not implemented")
-    return 0
-
-def _pthread_mutex_destroy(param0):
-    print("_pthread_mutex_destroy not implemented")
-    return 0
-
-def _pthread_mutex_init(param0,param1):
-    print("_pthread_mutex_init not implemented")
-    return 0
-
-def _pthread_mutexattr_destroy(param0):
-    print("_pthread_mutexattr_destroy not implemented")
-    return 0
-
-def _pthread_mutexattr_init(param0):
-    print("_pthread_mutexattr_init not implemented")
-    return 0
-
-def _pthread_mutexattr_setprotocol(param0,param1):
-    print("_pthread_mutexattr_setprotocol not implemented")
-    return 0
-
-def _pthread_mutexattr_settype(param0,param1):
-    print("_pthread_mutexattr_settype not implemented")
-    return 0
-
-def _pthread_once(param0,param1):
-    print("_pthread_once not implemented")
-    return 0
-
-def _pthread_setspecific(param0,param1):
-    print("_pthread_setspecific not implemented")
-    return 0
-
-def _sched_yield():
-    print("_sched_yield not implemented")
-    return 0
-
-def _setenv(param0,param1,param2):
-    print("_setenv not implemented")
-    return 0
-
-def _sigaction(param0,param1,param2):
-    print("_sigaction not implemented")
-    return 0
-
-def _sigemptyset(param0):
-    print("_sigemptyset not implemented")
-    return 0
-
-def _strftime(param0,param1,param2,param3):
-    print("_strftime not implemented")
-    return 0
-
-def _sysconf(param0):
-    print("_sysconf not implemented")
-    return 0
-
-def _time(param0):
-    print("_time not implemented")
-    return 0
-
-def _unsetenv(param0):
-    print("_unsetenv not implemented")
-    return 0
-
-def _utime(param0,param1):
-    print("_utime not implemented")
-    return 0
-
-def f64_rem(param0,param1):
-    print("f64_rem not implemented")
-    return 0
-
-def invoke_iiiiij(param0,param1,param2,param3,param4,param5,param6):
-    print("invoke_iiiiij not implemented")
-    return 0
-
-def invoke_iiiijii(param0,param1,param2,param3,param4,param5,param6,param7):
-    print("invoke_iiiijii not implemented")
-    return 0
-
-def invoke_iiiijjii(param0,param1,param2,param3,param4,param5,param6,param7,param8,param9):
-    print("invoke_iiiijjii not implemented")
-    return 0
-
-def invoke_iiiji(param0,param1,param2,param3,param4,param5):
-    print("invoke_iiiji not implemented")
-    return 0
-
-def invoke_iiijiii(param0,param1,param2,param3,param4,param5,param6,param7):
-    print("invoke_iiijiii not implemented")
-    return 0
-
-def invoke_iij(param0,param1,param2,param3):
-    print("invoke_iij not implemented")
-    return 0
-
-def invoke_iiji(param0,param1,param2,param3,param4):
-    print("invoke_iiji not implemented")
-    return 0
-
-def invoke_iijii(param0,param1,param2,param3,param4,param5):
-    print("invoke_iijii not implemented")
-    return 0
-
-def invoke_ijii(param0,param1,param2,param3,param4):
-    print("invoke_ijii not implemented")
-    return 0
-
-def invoke_j(param0):
-    print("invoke_j not implemented")
-    return 0
-
-def invoke_jdi(param0,param1,param2):
-    print("invoke_jdi not implemented")
-    return 0
-
-def invoke_ji(param0,param1):
-    print("invoke_ji not implemented")
-    return 0
-
-def invoke_jii(param0,param1,param2):
-    print("invoke_jii not implemented")
-    return 0
-
-def invoke_jiii(param0,param1,param2,param3):
-    print("invoke_jiii not implemented")
-    return 0
-
-def invoke_jiiii(param0,param1,param2,param3,param4):
-    print("invoke_jiiii not implemented")
-    return 0
-
-def invoke_jiiiii(param0,param1,param2,param3,param4,param5):
-    print("invoke_jiiiii not implemented")
-    return 0
-
-def invoke_jiiiiiiiiii(param0,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10):
-    print("invoke_jiiiiiiiiii not implemented")
-    return 0
-
-def invoke_jiiij(param0,param1,param2,param3,param4,param5):
-    print("invoke_jiiij not implemented")
-    return 0
-
-def invoke_jiiji(param0,param1,param2,param3,param4,param5):
-    print("invoke_jiiji not implemented")
-    return 0
-
-def invoke_jiji(param0,param1,param2,param3,param4):
-    print("invoke_jiji not implemented")
-    return 0
-
-def invoke_jijii(param0,param1,param2,param3,param4,param5):
-    print("invoke_jijii not implemented")
-    return 0
-
-def invoke_jijiii(param0,param1,param2,param3,param4,param5,param6):
-    print("invoke_jijiii not implemented")
-    return 0
-
-def invoke_jijj(param0,param1,param2,param3,param4,param5):
-    print("invoke_jijj not implemented")
-    return 0
-
-def invoke_jji(param0,param1,param2,param3):
-    print("invoke_jji not implemented")
-    return 0
-
-def invoke_viiiiiiifjjfii(param0,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10,param11,param12,param13,param14,param15):
-    print("invoke_viiiiiiifjjfii not implemented")
-    return 
-
-def invoke_viiiijiiii(param0,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10):
-    print("invoke_viiiijiiii not implemented")
-    return 
-
-def invoke_viiij(param0,param1,param2,param3,param4,param5):
-    print("invoke_viiij not implemented")
-    return 
-
-def invoke_viiiji(param0,param1,param2,param3,param4,param5,param6):
-    print("invoke_viiiji not implemented")
-    return 
-
-def invoke_viij(param0,param1,param2,param3,param4):
-    print("invoke_viij not implemented")
-    return 
-
-def invoke_viiji(param0,param1,param2,param3,param4,param5):
-    print("invoke_viiji not implemented")
-    return 
-
-def invoke_viijji(param0,param1,param2,param3,param4,param5,param6,param7):
-    print("invoke_viijji not implemented")
-    return 
-
-def invoke_viji(param0,param1,param2,param3,param4):
-    print("invoke_viji not implemented")
-    return 
-
-def invoke_vijii(param0,param1,param2,param3,param4,param5):
-    print("invoke_vijii not implemented")
-    return 
-
-def ___atomic_fetch_add_8(param0,param1,param2,param3):
-    print("___atomic_fetch_add_8 not implemented")
-    return 0
-
-def _glClientWaitSync(param0,param1,param2,param3):
-    print("_glClientWaitSync not implemented")
-    return 0
-
-def pow(param0, param1):
-    return pow(param0, param1)
-
-import_object = {
-    "env": {
-        "abort": Func(store, FuncType([ValType.i32()], []), abort),
-        "enlargeMemory": Func(store, FuncType([], [ValType.i32()]), enlargeMemory),
-        "getTotalMemory": Func(store, FuncType([], [ValType.i32()]), getTotalMemory),
-        "abortOnCannotGrowMemory": Func(store, FuncType([], [ValType.i32()]), abortOnCannotGrowMemory),
-        "invoke_dddi": Func(store, FuncType([ValType.i32(),ValType.f64(),ValType.f64(),ValType.i32()], [ValType.f64()]), invoke_dddi),
-        "invoke_dii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.f64()]), invoke_dii),
-        "invoke_diii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.f64()]), invoke_diii),
-        "invoke_diiid": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64()], [ValType.f64()]), invoke_diiid),
-        "invoke_diiii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.f64()]), invoke_diiii),
-        "invoke_ffffi": Func(store, FuncType([ValType.i32(),ValType.f64(),ValType.f64(),ValType.f64(),ValType.i32()], [ValType.f64()]), invoke_ffffi),
-        "invoke_fffi": Func(store, FuncType([ValType.i32(),ValType.f64(),ValType.f64(),ValType.i32()], [ValType.f64()]), invoke_fffi),
-        "invoke_fi": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.f64()]), invoke_fi),
-        "invoke_fii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.f64()]), invoke_fii),
-        "invoke_fiifi": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32()], [ValType.f64()]), invoke_fiifi),
-        "invoke_fiifii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32(),ValType.i32()], [ValType.f64()]), invoke_fiifii),
-        "invoke_fiii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.f64()]), invoke_fiii),
-        "invoke_fiiif": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64()], [ValType.f64()]), invoke_fiiif),
-        "invoke_fiiii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.f64()]), invoke_fiiii),
-        "invoke_i": Func(store, FuncType([ValType.i32()], [ValType.i32()]), invoke_i),
-        "invoke_ifi": Func(store, FuncType([ValType.i32(),ValType.f64(),ValType.i32()], [ValType.i32()]), invoke_ifi),
-        "invoke_ii": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_ii),
-        "invoke_iifii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_iifii),
-        "invoke_iii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_iii),
-        "invoke_iiifi": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32()], [ValType.i32()]), invoke_iiifi),
-        "invoke_iiii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_iiii),
-        "invoke_iiiifii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_iiiifii),
-        "invoke_iiiii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_iiiii),
-        "invoke_iiiiii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_iiiiii),
-        "invoke_iiiiiii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_iiiiiii),
-        "invoke_iiiiiiii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_iiiiiiii),
-        "invoke_iiiiiiiii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_iiiiiiiii),
-        "invoke_iiiiiiiiii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_iiiiiiiiii),
-        "invoke_iiiiiiiiiii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_iiiiiiiiiii),
-        "invoke_v": Func(store, FuncType([ValType.i32()], []), invoke_v),
-        "invoke_vi": Func(store, FuncType([ValType.i32(),ValType.i32()], []), invoke_vi),
-        "invoke_vidiii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32(),ValType.i32(),ValType.i32()], []), invoke_vidiii),
-        "invoke_vifffi": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.f64(),ValType.f64(),ValType.f64(),ValType.i32()], []), invoke_vifffi),
-        "invoke_vifi": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32()], []), invoke_vifi),
-        "invoke_vifii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32(),ValType.i32()], []), invoke_vifii),
-        "invoke_vii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), invoke_vii),
-        "invoke_viidi": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32()], []), invoke_viidi),
-        "invoke_viidii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32(),ValType.i32()], []), invoke_viidii),
-        "invoke_viiff": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.f64()], []), invoke_viiff),
-        "invoke_viiffi": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.f64(),ValType.i32()], []), invoke_viiffi),
-        "invoke_viifi": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32()], []), invoke_viifi),
-        "invoke_viifii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32(),ValType.i32()], []), invoke_viifii),
-        "invoke_viii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), invoke_viii),
-        "invoke_viiif": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64()], []), invoke_viiif),
-        "invoke_viiii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), invoke_viiii),
-        "invoke_viiiii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), invoke_viiiii),
-        "invoke_viiiiii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), invoke_viiiiii),
-        "invoke_viiiiiii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), invoke_viiiiiii),
-        "invoke_viiiiiiifddfii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.f64(),ValType.f64(),ValType.f64(),ValType.i32(),ValType.i32()], []), invoke_viiiiiiifddfii),
-        "invoke_viiiiiiiffffii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.f64(),ValType.f64(),ValType.f64(),ValType.i32(),ValType.i32()], []), invoke_viiiiiiiffffii),
-        "invoke_viiiiiiifiifii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32(),ValType.i32()], []), invoke_viiiiiiifiifii),
-        "invoke_viiiiiiii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), invoke_viiiiiiii),
-        "invoke_viiiiiiiii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), invoke_viiiiiiiii),
-        "invoke_viiiiiiiiii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), invoke_viiiiiiiiii),
-        "_ES_AddEventHandler": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _ES_AddEventHandler),
-        "_ES_Close": Func(store, FuncType([ValType.i32()], []), _ES_Close),
-        "_ES_Create": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _ES_Create),
-        "_ES_IsSupported": Func(store, FuncType([], [ValType.i32()]), _ES_IsSupported),
-        "_ES_Release": Func(store, FuncType([ValType.i32()], []), _ES_Release),
-        "_GetInputFieldSelectionEnd": Func(store, FuncType([], [ValType.i32()]), _GetInputFieldSelectionEnd),
-        "_GetInputFieldSelectionStart": Func(store, FuncType([], [ValType.i32()]), _GetInputFieldSelectionStart),
-        "_GetInputFieldValue": Func(store, FuncType([], [ValType.i32()]), _GetInputFieldValue),
-        "_HideInputField": Func(store, FuncType([], []), _HideInputField),
-        "_IsInputFieldActive": Func(store, FuncType([], [ValType.i32()]), _IsInputFieldActive),
-        "_JS_Cursor_SetImage": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _JS_Cursor_SetImage),
-        "_JS_Cursor_SetShow": Func(store, FuncType([ValType.i32()], []), _JS_Cursor_SetShow),
-        "_JS_Eval_ClearInterval": Func(store, FuncType([ValType.i32()], []), _JS_Eval_ClearInterval),
-        "_JS_Eval_OpenURL": Func(store, FuncType([ValType.i32()], []), _JS_Eval_OpenURL),
-        "_JS_Eval_SetInterval": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _JS_Eval_SetInterval),
-        "_JS_FileSystem_Initialize": Func(store, FuncType([], []), _JS_FileSystem_Initialize),
-        "_JS_FileSystem_Sync": Func(store, FuncType([], []), _JS_FileSystem_Sync),
-        "_JS_Log_Dump": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _JS_Log_Dump),
-        "_JS_Log_StackTrace": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _JS_Log_StackTrace),
-        "_JS_Sound_Create_Channel": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _JS_Sound_Create_Channel),
-        "_JS_Sound_GetLength": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _JS_Sound_GetLength),
-        "_JS_Sound_GetLoadState": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _JS_Sound_GetLoadState),
-        "_JS_Sound_Init": Func(store, FuncType([], []), _JS_Sound_Init),
-        "_JS_Sound_Load": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _JS_Sound_Load),
-        "_JS_Sound_Load_PCM": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _JS_Sound_Load_PCM),
-        "_JS_Sound_Play": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.f64(),ValType.f64()], []), _JS_Sound_Play),
-        "_JS_Sound_ReleaseInstance": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _JS_Sound_ReleaseInstance),
-        "_JS_Sound_ResumeIfNeeded": Func(store, FuncType([], []), _JS_Sound_ResumeIfNeeded),
-        "_JS_Sound_Set3D": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _JS_Sound_Set3D),
-        "_JS_Sound_SetListenerOrientation": Func(store, FuncType([ValType.f64(),ValType.f64(),ValType.f64(),ValType.f64(),ValType.f64(),ValType.f64()], []), _JS_Sound_SetListenerOrientation),
-        "_JS_Sound_SetListenerPosition": Func(store, FuncType([ValType.f64(),ValType.f64(),ValType.f64()], []), _JS_Sound_SetListenerPosition),
-        "_JS_Sound_SetLoop": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _JS_Sound_SetLoop),
-        "_JS_Sound_SetLoopPoints": Func(store, FuncType([ValType.i32(),ValType.f64(),ValType.f64()], []), _JS_Sound_SetLoopPoints),
-        "_JS_Sound_SetPaused": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _JS_Sound_SetPaused),
-        "_JS_Sound_SetPitch": Func(store, FuncType([ValType.i32(),ValType.f64()], []), _JS_Sound_SetPitch),
-        "_JS_Sound_SetPosition": Func(store, FuncType([ValType.i32(),ValType.f64(),ValType.f64(),ValType.f64()], []), _JS_Sound_SetPosition),
-        "_JS_Sound_SetVolume": Func(store, FuncType([ValType.i32(),ValType.f64()], []), _JS_Sound_SetVolume),
-        "_JS_Sound_Stop": Func(store, FuncType([ValType.i32(),ValType.f64()], []), _JS_Sound_Stop),
-        "_JS_SystemInfo_GetBrowserName": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _JS_SystemInfo_GetBrowserName),
-        "_JS_SystemInfo_GetBrowserVersionString": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _JS_SystemInfo_GetBrowserVersionString),
-        "_JS_SystemInfo_GetCanvasClientSize": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _JS_SystemInfo_GetCanvasClientSize),
-        "_JS_SystemInfo_GetDocumentURL": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _JS_SystemInfo_GetDocumentURL),
-        "_JS_SystemInfo_GetGPUInfo": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _JS_SystemInfo_GetGPUInfo),
-        "_JS_SystemInfo_GetLanguage": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _JS_SystemInfo_GetLanguage),
-        "_JS_SystemInfo_GetMemory": Func(store, FuncType([], [ValType.i32()]), _JS_SystemInfo_GetMemory),
-        "_JS_SystemInfo_GetOS": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _JS_SystemInfo_GetOS),
-        "_JS_SystemInfo_GetPreferredDevicePixelRatio": Func(store, FuncType([], [ValType.f64()]), _JS_SystemInfo_GetPreferredDevicePixelRatio),
-        "_JS_SystemInfo_GetScreenSize": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _JS_SystemInfo_GetScreenSize),
-        "_JS_SystemInfo_GetStreamingAssetsURL": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _JS_SystemInfo_GetStreamingAssetsURL),
-        "_JS_SystemInfo_HasCursorLock": Func(store, FuncType([], [ValType.i32()]), _JS_SystemInfo_HasCursorLock),
-        "_JS_SystemInfo_HasFullscreen": Func(store, FuncType([], [ValType.i32()]), _JS_SystemInfo_HasFullscreen),
-        "_JS_SystemInfo_HasWebGL": Func(store, FuncType([], [ValType.i32()]), _JS_SystemInfo_HasWebGL),
-        "_JS_SystemInfo_IsMobile": Func(store, FuncType([], [ValType.i32()]), _JS_SystemInfo_IsMobile),
-        "_JS_Video_CanPlayFormat": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _JS_Video_CanPlayFormat),
-        "_JS_Video_Create": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _JS_Video_Create),
-        "_JS_Video_Destroy": Func(store, FuncType([ValType.i32()], []), _JS_Video_Destroy),
-        "_JS_Video_Duration": Func(store, FuncType([ValType.i32()], [ValType.f64()]), _JS_Video_Duration),
-        "_JS_Video_EnableAudioTrack": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _JS_Video_EnableAudioTrack),
-        "_JS_Video_GetAudioLanguageCode": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _JS_Video_GetAudioLanguageCode),
-        "_JS_Video_GetNumAudioTracks": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _JS_Video_GetNumAudioTracks),
-        "_JS_Video_Height": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _JS_Video_Height),
-        "_JS_Video_IsPlaying": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _JS_Video_IsPlaying),
-        "_JS_Video_IsReady": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _JS_Video_IsReady),
-        "_JS_Video_Pause": Func(store, FuncType([ValType.i32()], []), _JS_Video_Pause),
-        "_JS_Video_Play": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _JS_Video_Play),
-        "_JS_Video_Seek": Func(store, FuncType([ValType.i32(),ValType.f64()], []), _JS_Video_Seek),
-        "_JS_Video_SetEndedHandler": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _JS_Video_SetEndedHandler),
-        "_JS_Video_SetErrorHandler": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _JS_Video_SetErrorHandler),
-        "_JS_Video_SetLoop": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _JS_Video_SetLoop),
-        "_JS_Video_SetMute": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _JS_Video_SetMute),
-        "_JS_Video_SetPlaybackRate": Func(store, FuncType([ValType.i32(),ValType.f64()], []), _JS_Video_SetPlaybackRate),
-        "_JS_Video_SetReadyHandler": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _JS_Video_SetReadyHandler),
-        "_JS_Video_SetSeekedOnceHandler": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _JS_Video_SetSeekedOnceHandler),
-        "_JS_Video_SetVolume": Func(store, FuncType([ValType.i32(),ValType.f64()], []), _JS_Video_SetVolume),
-        "_JS_Video_Time": Func(store, FuncType([ValType.i32()], [ValType.f64()]), _JS_Video_Time),
-        "_JS_Video_UpdateToTexture": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _JS_Video_UpdateToTexture),
-        "_JS_Video_Width": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _JS_Video_Width),
-        "_JS_WebCamVideo_CanPlay": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _JS_WebCamVideo_CanPlay),
-        "_JS_WebCamVideo_GetDeviceName": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _JS_WebCamVideo_GetDeviceName),
-        "_JS_WebCamVideo_GetNativeHeight": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _JS_WebCamVideo_GetNativeHeight),
-        "_JS_WebCamVideo_GetNativeWidth": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _JS_WebCamVideo_GetNativeWidth),
-        "_JS_WebCamVideo_GetNumDevices": Func(store, FuncType([], [ValType.i32()]), _JS_WebCamVideo_GetNumDevices),
-        "_JS_WebCamVideo_GrabFrame": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _JS_WebCamVideo_GrabFrame),
-        "_JS_WebCamVideo_Start": Func(store, FuncType([ValType.i32()], []), _JS_WebCamVideo_Start),
-        "_JS_WebCamVideo_Stop": Func(store, FuncType([ValType.i32()], []), _JS_WebCamVideo_Stop),
-        "_JS_WebCam_IsSupported": Func(store, FuncType([], [ValType.i32()]), _JS_WebCam_IsSupported),
-        "_JS_WebRequest_Abort": Func(store, FuncType([ValType.i32()], []), _JS_WebRequest_Abort),
-        "_JS_WebRequest_Create": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _JS_WebRequest_Create),
-        "_JS_WebRequest_GetResponseHeaders": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _JS_WebRequest_GetResponseHeaders),
-        "_JS_WebRequest_Release": Func(store, FuncType([ValType.i32()], []), _JS_WebRequest_Release),
-        "_JS_WebRequest_Send": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _JS_WebRequest_Send),
-        "_JS_WebRequest_SetProgressHandler": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _JS_WebRequest_SetProgressHandler),
-        "_JS_WebRequest_SetRequestHeader": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _JS_WebRequest_SetRequestHeader),
-        "_JS_WebRequest_SetResponseHandler": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _JS_WebRequest_SetResponseHandler),
-        "_JS_WebRequest_SetTimeout": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _JS_WebRequest_SetTimeout),
-        "_NativeCall": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _NativeCall),
-        "_SetInputFieldSelection": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _SetInputFieldSelection),
-        "_ShowInputField": Func(store, FuncType([ValType.i32()], []), _ShowInputField),
-        "_WS_Close": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _WS_Close),
-        "_WS_Create": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _WS_Create),
-        "_WS_GetBufferedAmount": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _WS_GetBufferedAmount),
-        "_WS_GetState": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _WS_GetState),
-        "_WS_Release": Func(store, FuncType([ValType.i32()], []), _WS_Release),
-        "_WS_Send_Binary": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _WS_Send_Binary),
-        "_WS_Send_String": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _WS_Send_String),
-        "_XHR_Abort": Func(store, FuncType([ValType.i32()], []), _XHR_Abort),
-        "_XHR_Create": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _XHR_Create),
-        "_XHR_GetResponseHeaders": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _XHR_GetResponseHeaders),
-        "_XHR_GetStatusLine": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _XHR_GetStatusLine),
-        "_XHR_Release": Func(store, FuncType([ValType.i32()], []), _XHR_Release),
-        "_XHR_Send": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _XHR_Send),
-        "_XHR_SetLoglevel": Func(store, FuncType([ValType.i32()], []), _XHR_SetLoglevel),
-        "_XHR_SetProgressHandler": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _XHR_SetProgressHandler),
-        "_XHR_SetRequestHeader": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _XHR_SetRequestHeader),
-        "_XHR_SetResponseHandler": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _XHR_SetResponseHandler),
-        "_XHR_SetTimeout": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _XHR_SetTimeout),
-        "___buildEnvironment": Func(store, FuncType([ValType.i32()], []), ___buildEnvironment),
-        "___cxa_allocate_exception": Func(store, FuncType([ValType.i32()], [ValType.i32()]), ___cxa_allocate_exception),
-        "___cxa_begin_catch": Func(store, FuncType([ValType.i32()], [ValType.i32()]), ___cxa_begin_catch),
-        "___cxa_end_catch": Func(store, FuncType([], []), ___cxa_end_catch),
-        "___cxa_find_matching_catch_2": Func(store, FuncType([], [ValType.i32()]), ___cxa_find_matching_catch_2),
-        "___cxa_find_matching_catch_3": Func(store, FuncType([ValType.i32()], [ValType.i32()]), ___cxa_find_matching_catch_3),
-        "___cxa_find_matching_catch_4": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___cxa_find_matching_catch_4),
-        "___cxa_free_exception": Func(store, FuncType([ValType.i32()], []), ___cxa_free_exception),
-        "___cxa_pure_virtual": Func(store, FuncType([], []), ___cxa_pure_virtual),
-        "___cxa_rethrow": Func(store, FuncType([], []), ___cxa_rethrow),
-        "___cxa_throw": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), ___cxa_throw),
-        "___lock": Func(store, FuncType([ValType.i32()], []), ___lock),
-        "___map_file": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___map_file),
-        "___resumeException": Func(store, FuncType([ValType.i32()], []), ___resumeException),
-        "___setErrNo": Func(store, FuncType([ValType.i32()], []), ___setErrNo),
-        "___syscall10": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall10),
-        "___syscall102": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall102),
-        "___syscall122": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall122),
-        "___syscall140": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall140),
-        "___syscall142": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall142),
-        "___syscall145": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall145),
-        "___syscall146": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall146),
-        "___syscall15": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall15),
-        "___syscall168": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall168),
-        "___syscall183": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall183),
-        "___syscall192": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall192),
-        "___syscall193": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall193),
-        "___syscall194": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall194),
-        "___syscall195": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall195),
-        "___syscall196": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall196),
-        "___syscall197": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall197),
-        "___syscall199": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall199),
-        "___syscall220": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall220),
-        "___syscall221": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall221),
-        "___syscall268": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall268),
-        "___syscall3": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall3),
-        "___syscall33": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall33),
-        "___syscall38": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall38),
-        "___syscall39": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall39),
-        "___syscall4": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall4),
-        "___syscall40": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall40),
-        "___syscall42": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall42),
-        "___syscall5": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall5),
-        "___syscall54": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall54),
-        "___syscall6": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall6),
-        "___syscall63": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall63),
-        "___syscall77": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall77),
-        "___syscall85": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall85),
-        "___syscall91": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), ___syscall91),
-        "___unlock": Func(store, FuncType([ValType.i32()], []), ___unlock),
-        "_abort": Func(store, FuncType([], []), _abort),
-        "_atexit": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _atexit),
-        "_clock": Func(store, FuncType([], [ValType.i32()]), _clock),
-        "_clock_getres": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _clock_getres),
-        "_clock_gettime": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _clock_gettime),
-        "_difftime": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.f64()]), _difftime),
-        "_dlclose": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _dlclose),
-        "_dlopen": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _dlopen),
-        "_dlsym": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _dlsym),
-        "_emscripten_asm_const_i": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _emscripten_asm_const_i),
-        "_emscripten_asm_const_sync_on_main_thread_i": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _emscripten_asm_const_sync_on_main_thread_i),
-        "_emscripten_cancel_main_loop": Func(store, FuncType([], []), _emscripten_cancel_main_loop),
-        "_emscripten_exit_fullscreen": Func(store, FuncType([], [ValType.i32()]), _emscripten_exit_fullscreen),
-        "_emscripten_exit_pointerlock": Func(store, FuncType([], [ValType.i32()]), _emscripten_exit_pointerlock),
-        "_emscripten_get_canvas_element_size": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_get_canvas_element_size),
-        "_emscripten_get_fullscreen_status": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _emscripten_get_fullscreen_status),
-        "_emscripten_get_gamepad_status": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_get_gamepad_status),
-        "_emscripten_get_main_loop_timing": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _emscripten_get_main_loop_timing),
-        "_emscripten_get_now": Func(store, FuncType([], [ValType.f64()]), _emscripten_get_now),
-        "_emscripten_get_num_gamepads": Func(store, FuncType([], [ValType.i32()]), _emscripten_get_num_gamepads),
-        "_emscripten_has_threading_support": Func(store, FuncType([], [ValType.i32()]), _emscripten_has_threading_support),
-        "_emscripten_html5_remove_all_event_listeners": Func(store, FuncType([], []), _emscripten_html5_remove_all_event_listeners),
-        "_emscripten_is_webgl_context_lost": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _emscripten_is_webgl_context_lost),
-        "_emscripten_log": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _emscripten_log),
-        "_emscripten_longjmp": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _emscripten_longjmp),
-        "_emscripten_memcpy_big": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_memcpy_big),
-        "_emscripten_num_logical_cores": Func(store, FuncType([], [ValType.i32()]), _emscripten_num_logical_cores),
-        "_emscripten_request_fullscreen": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_request_fullscreen),
-        "_emscripten_request_pointerlock": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_request_pointerlock),
-        "_emscripten_set_blur_callback_on_thread": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_set_blur_callback_on_thread),
-        "_emscripten_set_canvas_element_size": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_set_canvas_element_size),
-        "_emscripten_set_dblclick_callback_on_thread": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_set_dblclick_callback_on_thread),
-        "_emscripten_set_devicemotion_callback_on_thread": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_set_devicemotion_callback_on_thread),
-        "_emscripten_set_deviceorientation_callback_on_thread": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_set_deviceorientation_callback_on_thread),
-        "_emscripten_set_focus_callback_on_thread": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_set_focus_callback_on_thread),
-        "_emscripten_set_fullscreenchange_callback_on_thread": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_set_fullscreenchange_callback_on_thread),
-        "_emscripten_set_gamepadconnected_callback_on_thread": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_set_gamepadconnected_callback_on_thread),
-        "_emscripten_set_gamepaddisconnected_callback_on_thread": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_set_gamepaddisconnected_callback_on_thread),
-        "_emscripten_set_keydown_callback_on_thread": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_set_keydown_callback_on_thread),
-        "_emscripten_set_keypress_callback_on_thread": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_set_keypress_callback_on_thread),
-        "_emscripten_set_keyup_callback_on_thread": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_set_keyup_callback_on_thread),
-        "_emscripten_set_main_loop": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _emscripten_set_main_loop),
-        "_emscripten_set_main_loop_timing": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_set_main_loop_timing),
-        "_emscripten_set_mousedown_callback_on_thread": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_set_mousedown_callback_on_thread),
-        "_emscripten_set_mousemove_callback_on_thread": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_set_mousemove_callback_on_thread),
-        "_emscripten_set_mouseup_callback_on_thread": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_set_mouseup_callback_on_thread),
-        "_emscripten_set_touchcancel_callback_on_thread": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_set_touchcancel_callback_on_thread),
-        "_emscripten_set_touchend_callback_on_thread": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_set_touchend_callback_on_thread),
-        "_emscripten_set_touchmove_callback_on_thread": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_set_touchmove_callback_on_thread),
-        "_emscripten_set_touchstart_callback_on_thread": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_set_touchstart_callback_on_thread),
-        "_emscripten_set_wheel_callback_on_thread": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_set_wheel_callback_on_thread),
-        "_emscripten_webgl_create_context": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_webgl_create_context),
-        "_emscripten_webgl_destroy_context": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _emscripten_webgl_destroy_context),
-        "_emscripten_webgl_enable_extension": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _emscripten_webgl_enable_extension),
-        "_emscripten_webgl_get_current_context": Func(store, FuncType([], [ValType.i32()]), _emscripten_webgl_get_current_context),
-        "_emscripten_webgl_init_context_attributes": Func(store, FuncType([ValType.i32()], []), _emscripten_webgl_init_context_attributes),
-        "_emscripten_webgl_make_context_current": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _emscripten_webgl_make_context_current),
-        "_exit": Func(store, FuncType([ValType.i32()], []), _exit),
-        "_flock": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _flock),
-        "_getaddrinfo": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _getaddrinfo),
-        "_getenv": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _getenv),
-        "_gethostbyaddr": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _gethostbyaddr),
-        "_gethostbyname": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _gethostbyname),
-        "_getnameinfo": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _getnameinfo),
-        "_getpagesize": Func(store, FuncType([], [ValType.i32()]), _getpagesize),
-        "_getpwuid": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _getpwuid),
-        "_gettimeofday": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _gettimeofday),
-        "_glActiveTexture": Func(store, FuncType([ValType.i32()], []), _glActiveTexture),
-        "_glAttachShader": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glAttachShader),
-        "_glBeginQuery": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glBeginQuery),
-        "_glBeginTransformFeedback": Func(store, FuncType([ValType.i32()], []), _glBeginTransformFeedback),
-        "_glBindAttribLocation": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glBindAttribLocation),
-        "_glBindBuffer": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glBindBuffer),
-        "_glBindBufferBase": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glBindBufferBase),
-        "_glBindBufferRange": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glBindBufferRange),
-        "_glBindFramebuffer": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glBindFramebuffer),
-        "_glBindRenderbuffer": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glBindRenderbuffer),
-        "_glBindSampler": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glBindSampler),
-        "_glBindTexture": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glBindTexture),
-        "_glBindTransformFeedback": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glBindTransformFeedback),
-        "_glBindVertexArray": Func(store, FuncType([ValType.i32()], []), _glBindVertexArray),
-        "_glBlendEquation": Func(store, FuncType([ValType.i32()], []), _glBlendEquation),
-        "_glBlendEquationSeparate": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glBlendEquationSeparate),
-        "_glBlendFuncSeparate": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glBlendFuncSeparate),
-        "_glBlitFramebuffer": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glBlitFramebuffer),
-        "_glBufferData": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glBufferData),
-        "_glBufferSubData": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glBufferSubData),
-        "_glCheckFramebufferStatus": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _glCheckFramebufferStatus),
-        "_glClear": Func(store, FuncType([ValType.i32()], []), _glClear),
-        "_glClearBufferfi": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32()], []), _glClearBufferfi),
-        "_glClearBufferfv": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glClearBufferfv),
-        "_glClearBufferuiv": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glClearBufferuiv),
-        "_glClearColor": Func(store, FuncType([ValType.f64(),ValType.f64(),ValType.f64(),ValType.f64()], []), _glClearColor),
-        "_glClearDepthf": Func(store, FuncType([ValType.f64()], []), _glClearDepthf),
-        "_glClearStencil": Func(store, FuncType([ValType.i32()], []), _glClearStencil),
-        "_glColorMask": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glColorMask),
-        "_glCompileShader": Func(store, FuncType([ValType.i32()], []), _glCompileShader),
-        "_glCompressedTexImage2D": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glCompressedTexImage2D),
-        "_glCompressedTexSubImage2D": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glCompressedTexSubImage2D),
-        "_glCompressedTexSubImage3D": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glCompressedTexSubImage3D),
-        "_glCopyBufferSubData": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glCopyBufferSubData),
-        "_glCopyTexImage2D": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glCopyTexImage2D),
-        "_glCopyTexSubImage2D": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glCopyTexSubImage2D),
-        "_glCreateProgram": Func(store, FuncType([], [ValType.i32()]), _glCreateProgram),
-        "_glCreateShader": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _glCreateShader),
-        "_glCullFace": Func(store, FuncType([ValType.i32()], []), _glCullFace),
-        "_glDeleteBuffers": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glDeleteBuffers),
-        "_glDeleteFramebuffers": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glDeleteFramebuffers),
-        "_glDeleteProgram": Func(store, FuncType([ValType.i32()], []), _glDeleteProgram),
-        "_glDeleteQueries": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glDeleteQueries),
-        "_glDeleteRenderbuffers": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glDeleteRenderbuffers),
-        "_glDeleteSamplers": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glDeleteSamplers),
-        "_glDeleteShader": Func(store, FuncType([ValType.i32()], []), _glDeleteShader),
-        "_glDeleteSync": Func(store, FuncType([ValType.i32()], []), _glDeleteSync),
-        "_glDeleteTextures": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glDeleteTextures),
-        "_glDeleteTransformFeedbacks": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glDeleteTransformFeedbacks),
-        "_glDeleteVertexArrays": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glDeleteVertexArrays),
-        "_glDepthFunc": Func(store, FuncType([ValType.i32()], []), _glDepthFunc),
-        "_glDepthMask": Func(store, FuncType([ValType.i32()], []), _glDepthMask),
-        "_glDetachShader": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glDetachShader),
-        "_glDisable": Func(store, FuncType([ValType.i32()], []), _glDisable),
-        "_glDisableVertexAttribArray": Func(store, FuncType([ValType.i32()], []), _glDisableVertexAttribArray),
-        "_glDrawArrays": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glDrawArrays),
-        "_glDrawArraysInstanced": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glDrawArraysInstanced),
-        "_glDrawBuffers": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glDrawBuffers),
-        "_glDrawElements": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glDrawElements),
-        "_glDrawElementsInstanced": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glDrawElementsInstanced),
-        "_glEnable": Func(store, FuncType([ValType.i32()], []), _glEnable),
-        "_glEnableVertexAttribArray": Func(store, FuncType([ValType.i32()], []), _glEnableVertexAttribArray),
-        "_glEndQuery": Func(store, FuncType([ValType.i32()], []), _glEndQuery),
-        "_glEndTransformFeedback": Func(store, FuncType([], []), _glEndTransformFeedback),
-        "_glFenceSync": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _glFenceSync),
-        "_glFinish": Func(store, FuncType([], []), _glFinish),
-        "_glFlush": Func(store, FuncType([], []), _glFlush),
-        "_glFlushMappedBufferRange": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glFlushMappedBufferRange),
-        "_glFramebufferRenderbuffer": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glFramebufferRenderbuffer),
-        "_glFramebufferTexture2D": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glFramebufferTexture2D),
-        "_glFramebufferTextureLayer": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glFramebufferTextureLayer),
-        "_glFrontFace": Func(store, FuncType([ValType.i32()], []), _glFrontFace),
-        "_glGenBuffers": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glGenBuffers),
-        "_glGenFramebuffers": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glGenFramebuffers),
-        "_glGenQueries": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glGenQueries),
-        "_glGenRenderbuffers": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glGenRenderbuffers),
-        "_glGenSamplers": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glGenSamplers),
-        "_glGenTextures": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glGenTextures),
-        "_glGenTransformFeedbacks": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glGenTransformFeedbacks),
-        "_glGenVertexArrays": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glGenVertexArrays),
-        "_glGenerateMipmap": Func(store, FuncType([ValType.i32()], []), _glGenerateMipmap),
-        "_glGetActiveAttrib": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glGetActiveAttrib),
-        "_glGetActiveUniform": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glGetActiveUniform),
-        "_glGetActiveUniformBlockName": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glGetActiveUniformBlockName),
-        "_glGetActiveUniformBlockiv": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glGetActiveUniformBlockiv),
-        "_glGetActiveUniformsiv": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glGetActiveUniformsiv),
-        "_glGetAttribLocation": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _glGetAttribLocation),
-        "_glGetError": Func(store, FuncType([], [ValType.i32()]), _glGetError),
-        "_glGetFramebufferAttachmentParameteriv": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glGetFramebufferAttachmentParameteriv),
-        "_glGetIntegeri_v": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glGetIntegeri_v),
-        "_glGetIntegerv": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glGetIntegerv),
-        "_glGetInternalformativ": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glGetInternalformativ),
-        "_glGetProgramBinary": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glGetProgramBinary),
-        "_glGetProgramInfoLog": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glGetProgramInfoLog),
-        "_glGetProgramiv": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glGetProgramiv),
-        "_glGetRenderbufferParameteriv": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glGetRenderbufferParameteriv),
-        "_glGetShaderInfoLog": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glGetShaderInfoLog),
-        "_glGetShaderPrecisionFormat": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glGetShaderPrecisionFormat),
-        "_glGetShaderSource": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glGetShaderSource),
-        "_glGetShaderiv": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glGetShaderiv),
-        "_glGetString": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _glGetString),
-        "_glGetStringi": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _glGetStringi),
-        "_glGetTexParameteriv": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glGetTexParameteriv),
-        "_glGetUniformBlockIndex": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _glGetUniformBlockIndex),
-        "_glGetUniformIndices": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glGetUniformIndices),
-        "_glGetUniformLocation": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _glGetUniformLocation),
-        "_glGetUniformiv": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glGetUniformiv),
-        "_glGetVertexAttribiv": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glGetVertexAttribiv),
-        "_glInvalidateFramebuffer": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glInvalidateFramebuffer),
-        "_glIsEnabled": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _glIsEnabled),
-        "_glIsVertexArray": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _glIsVertexArray),
-        "_glLinkProgram": Func(store, FuncType([ValType.i32()], []), _glLinkProgram),
-        "_glMapBufferRange": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _glMapBufferRange),
-        "_glPixelStorei": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glPixelStorei),
-        "_glPolygonOffset": Func(store, FuncType([ValType.f64(),ValType.f64()], []), _glPolygonOffset),
-        "_glProgramBinary": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glProgramBinary),
-        "_glProgramParameteri": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glProgramParameteri),
-        "_glReadBuffer": Func(store, FuncType([ValType.i32()], []), _glReadBuffer),
-        "_glReadPixels": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glReadPixels),
-        "_glRenderbufferStorage": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glRenderbufferStorage),
-        "_glRenderbufferStorageMultisample": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glRenderbufferStorageMultisample),
-        "_glSamplerParameteri": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glSamplerParameteri),
-        "_glScissor": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glScissor),
-        "_glShaderSource": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glShaderSource),
-        "_glStencilFuncSeparate": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glStencilFuncSeparate),
-        "_glStencilMask": Func(store, FuncType([ValType.i32()], []), _glStencilMask),
-        "_glStencilOpSeparate": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glStencilOpSeparate),
-        "_glTexImage2D": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glTexImage2D),
-        "_glTexImage3D": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glTexImage3D),
-        "_glTexParameterf": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.f64()], []), _glTexParameterf),
-        "_glTexParameteri": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glTexParameteri),
-        "_glTexParameteriv": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glTexParameteriv),
-        "_glTexStorage2D": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glTexStorage2D),
-        "_glTexStorage3D": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glTexStorage3D),
-        "_glTexSubImage2D": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glTexSubImage2D),
-        "_glTexSubImage3D": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glTexSubImage3D),
-        "_glTransformFeedbackVaryings": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glTransformFeedbackVaryings),
-        "_glUniform1fv": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glUniform1fv),
-        "_glUniform1i": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glUniform1i),
-        "_glUniform1iv": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glUniform1iv),
-        "_glUniform1uiv": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glUniform1uiv),
-        "_glUniform2fv": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glUniform2fv),
-        "_glUniform2iv": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glUniform2iv),
-        "_glUniform2uiv": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glUniform2uiv),
-        "_glUniform3fv": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glUniform3fv),
-        "_glUniform3iv": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glUniform3iv),
-        "_glUniform3uiv": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glUniform3uiv),
-        "_glUniform4fv": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glUniform4fv),
-        "_glUniform4iv": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glUniform4iv),
-        "_glUniform4uiv": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glUniform4uiv),
-        "_glUniformBlockBinding": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), _glUniformBlockBinding),
-        "_glUniformMatrix3fv": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glUniformMatrix3fv),
-        "_glUniformMatrix4fv": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glUniformMatrix4fv),
-        "_glUnmapBuffer": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _glUnmapBuffer),
-        "_glUseProgram": Func(store, FuncType([ValType.i32()], []), _glUseProgram),
-        "_glValidateProgram": Func(store, FuncType([ValType.i32()], []), _glValidateProgram),
-        "_glVertexAttrib4f": Func(store, FuncType([ValType.i32(),ValType.f64(),ValType.f64(),ValType.f64(),ValType.f64()], []), _glVertexAttrib4f),
-        "_glVertexAttrib4fv": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _glVertexAttrib4fv),
-        "_glVertexAttribIPointer": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glVertexAttribIPointer),
-        "_glVertexAttribPointer": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glVertexAttribPointer),
-        "_glViewport": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), _glViewport),
-        "_gmtime": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _gmtime),
-        "_inet_addr": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _inet_addr),
-        "_llvm_eh_typeid_for": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _llvm_eh_typeid_for),
-        "_llvm_exp2_f32": Func(store, FuncType([ValType.f64()], [ValType.f64()]), _llvm_exp2_f32),
-        "_llvm_log10_f32": Func(store, FuncType([ValType.f64()], [ValType.f64()]), _llvm_log10_f32),
-        "_llvm_log10_f64": Func(store, FuncType([ValType.f64()], [ValType.f64()]), _llvm_log10_f64),
-        "_llvm_log2_f32": Func(store, FuncType([ValType.f64()], [ValType.f64()]), _llvm_log2_f32),
-        "_llvm_trap": Func(store, FuncType([], []), _llvm_trap),
-        "_llvm_trunc_f32": Func(store, FuncType([ValType.f64()], [ValType.f64()]), _llvm_trunc_f32),
-        "_localtime": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _localtime),
-        "_longjmp": Func(store, FuncType([ValType.i32(),ValType.i32()], []), _longjmp),
-        "_mktime": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _mktime),
-        "_pthread_cond_destroy": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _pthread_cond_destroy),
-        "_pthread_cond_init": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _pthread_cond_init),
-        "_pthread_cond_timedwait": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _pthread_cond_timedwait),
-        "_pthread_cond_wait": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _pthread_cond_wait),
-        "_pthread_getspecific": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _pthread_getspecific),
-        "_pthread_key_create": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _pthread_key_create),
-        "_pthread_key_delete": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _pthread_key_delete),
-        "_pthread_mutex_destroy": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _pthread_mutex_destroy),
-        "_pthread_mutex_init": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _pthread_mutex_init),
-        "_pthread_mutexattr_destroy": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _pthread_mutexattr_destroy),
-        "_pthread_mutexattr_init": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _pthread_mutexattr_init),
-        "_pthread_mutexattr_setprotocol": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _pthread_mutexattr_setprotocol),
-        "_pthread_mutexattr_settype": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _pthread_mutexattr_settype),
-        "_pthread_once": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _pthread_once),
-        "_pthread_setspecific": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _pthread_setspecific),
-        "_sched_yield": Func(store, FuncType([], [ValType.i32()]), _sched_yield),
-        "_setenv": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _setenv),
-        "_sigaction": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _sigaction),
-        "_sigemptyset": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _sigemptyset),
-        "_strftime": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _strftime),
-        "_sysconf": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _sysconf),
-        "_time": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _time),
-        "_unsetenv": Func(store, FuncType([ValType.i32()], [ValType.i32()]), _unsetenv),
-        "_utime": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), _utime),
-        "f64_rem": Func(store, FuncType([ValType.f64(),ValType.f64()], [ValType.f64()]), f64_rem),
-        "invoke_iiiiij": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_iiiiij),
-        "invoke_iiiijii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_iiiijii),
-        "invoke_iiiijjii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_iiiijjii),
-        "invoke_iiiji": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_iiiji),
-        "invoke_iiijiii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_iiijiii),
-        "invoke_iij": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_iij),
-        "invoke_iiji": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_iiji),
-        "invoke_iijii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_iijii),
-        "invoke_ijii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_ijii),
-        "invoke_j": Func(store, FuncType([ValType.i32()], [ValType.i32()]), invoke_j),
-        "invoke_jdi": Func(store, FuncType([ValType.i32(),ValType.f64(),ValType.i32()], [ValType.i32()]), invoke_jdi),
-        "invoke_ji": Func(store, FuncType([ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_ji),
-        "invoke_jii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_jii),
-        "invoke_jiii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_jiii),
-        "invoke_jiiii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_jiiii),
-        "invoke_jiiiii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_jiiiii),
-        "invoke_jiiiiiiiiii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_jiiiiiiiiii),
-        "invoke_jiiij": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_jiiij),
-        "invoke_jiiji": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_jiiji),
-        "invoke_jiji": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_jiji),
-        "invoke_jijii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_jijii),
-        "invoke_jijiii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_jijiii),
-        "invoke_jijj": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_jijj),
-        "invoke_jji": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), invoke_jji),
-        "invoke_viiiiiiifjjfii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.f64(),ValType.i32(),ValType.i32()], []), invoke_viiiiiiifjjfii),
-        "invoke_viiiijiiii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), invoke_viiiijiiii),
-        "invoke_viiij": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), invoke_viiij),
-        "invoke_viiiji": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), invoke_viiiji),
-        "invoke_viij": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), invoke_viij),
-        "invoke_viiji": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), invoke_viiji),
-        "invoke_viijji": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), invoke_viijji),
-        "invoke_viji": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), invoke_viji),
-        "invoke_vijii": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), invoke_vijii),
-        "___atomic_fetch_add_8": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), ___atomic_fetch_add_8),
-        "_glClientWaitSync": Func(store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), _glClientWaitSync),
-}}
-
-test = [memory, 
- table, 
- global_tableBase,
- global_DYNAMICTOP_PTR,
- global_STACKTOP,
- global_STACK_MAX,
- Global(store, global_type64, Val.f64(float('nan'))),
- Global(store, global_type64, Val.f64(float('inf'))),
- Func(store, FuncType([ValType.f64(), ValType.f64()], [ValType.f64()]), pow),
-]+list(import_object['env'].values())
-
-instance = Instance(store, wasm_module, test)
-from functools import partial
-__growWasmMemory = partial(instance.exports(store)["__growWasmMemory"], store)
-stackAlloc = partial(instance.exports(store)["stackAlloc"], store)
-stackSave = partial(instance.exports(store)["stackSave"], store)
-stackRestore = partial(instance.exports(store)["stackRestore"], store)
-establishStackSpace = partial(instance.exports(store)["establishStackSpace"], store)
-setThrew = partial(instance.exports(store)["setThrew"], store)
-setTempRet0 = partial(instance.exports(store)["setTempRet0"], store)
-getTempRet0 = partial(instance.exports(store)["getTempRet0"], store)
-__GLOBAL__sub_I_AIScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_AIScriptingClasses_cpp"], store)
-___cxx_global_var_init = partial(instance.exports(store)["___cxx_global_var_init"], store)
-_pthread_mutex_unlock = partial(instance.exports(store)["_pthread_mutex_unlock"], store)
-runPostSets = partial(instance.exports(store)["runPostSets"], store)
-__GLOBAL__sub_I_AccessibilityScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_AccessibilityScriptingClasses_cpp"], store)
-__GLOBAL__sub_I_AndroidJNIScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_AndroidJNIScriptingClasses_cpp"], store)
-__GLOBAL__sub_I_AnimationScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_AnimationScriptingClasses_cpp"], store)
-__GLOBAL__sub_I_Modules_Animation_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_Animation_1_cpp"], store)
-__GLOBAL__sub_I_Modules_Animation_3_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_Animation_3_cpp"], store)
-__GLOBAL__sub_I_Modules_Animation_6_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_Animation_6_cpp"], store)
-__GLOBAL__sub_I_Avatar_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Avatar_cpp"], store)
-__GLOBAL__sub_I_ConstraintManager_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_ConstraintManager_cpp"], store)
-__GLOBAL__sub_I_AnimationClip_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_AnimationClip_cpp"], store)
-__GLOBAL__sub_I_AssetBundleScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_AssetBundleScriptingClasses_cpp"], store)
-__GLOBAL__sub_I_Modules_AssetBundle_Public_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_AssetBundle_Public_0_cpp"], store)
-__GLOBAL__sub_I_AudioScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_AudioScriptingClasses_cpp"], store)
-__GLOBAL__sub_I_Runtime_Video_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Video_0_cpp"], store)
-__GLOBAL__sub_I_Modules_Audio_Public_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_Audio_Public_0_cpp"], store)
-__GLOBAL__sub_I_Modules_Audio_Public_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_Audio_Public_1_cpp"], store)
-__GLOBAL__sub_I_Modules_Audio_Public_3_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_Audio_Public_3_cpp"], store)
-__GLOBAL__sub_I_Modules_Audio_Public_ScriptBindings_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_Audio_Public_ScriptBindings_1_cpp"], store)
-__GLOBAL__sub_I_Modules_Audio_Public_sound_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_Audio_Public_sound_0_cpp"], store)
-__GLOBAL__sub_I_ClothScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_ClothScriptingClasses_cpp"], store)
-__GLOBAL__sub_I_Modules_Cloth_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_Cloth_0_cpp"], store)
-___cxx_global_var_init_18 = partial(instance.exports(store)["___cxx_global_var_init_18"], store)
-__GLOBAL__sub_I_nvcloth_src_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_nvcloth_src_0_cpp"], store)
-__GLOBAL__sub_I_nvcloth_src_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_nvcloth_src_1_cpp"], store)
-__GLOBAL__sub_I_SwInterCollision_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_SwInterCollision_cpp"], store)
-__GLOBAL__sub_I_SwSolverKernel_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_SwSolverKernel_cpp"], store)
-__GLOBAL__sub_I_artifacts_WebGL_codegenerator_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_artifacts_WebGL_codegenerator_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_GfxDevice_opengles_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_GfxDevice_opengles_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_VirtualFileSystem_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_VirtualFileSystem_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_Input_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Input_0_cpp"], store)
-__GLOBAL__sub_I_GfxDeviceNull_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_GfxDeviceNull_cpp"], store)
-__GLOBAL__sub_I_External_ProphecySDK_BlitOperations_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_External_ProphecySDK_BlitOperations_1_cpp"], store)
-__GLOBAL__sub_I_Runtime_2D_Renderer_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_2D_Renderer_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_2D_Sorting_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_2D_Sorting_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_2D_SpriteAtlas_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_2D_SpriteAtlas_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_Allocator_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Allocator_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_Allocator_2_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Allocator_2_cpp"], store)
-___cxx_global_var_init_7 = partial(instance.exports(store)["___cxx_global_var_init_7"], store)
-__GLOBAL__sub_I_Runtime_Application_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Application_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_BaseClasses_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_BaseClasses_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_BaseClasses_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_BaseClasses_1_cpp"], store)
-__GLOBAL__sub_I_Runtime_BaseClasses_2_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_BaseClasses_2_cpp"], store)
-__GLOBAL__sub_I_Runtime_BaseClasses_3_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_BaseClasses_3_cpp"], store)
-__GLOBAL__sub_I_Runtime_Burst_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Burst_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_Camera_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Camera_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_Camera_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Camera_1_cpp"], store)
-__GLOBAL__sub_I_Runtime_Camera_2_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Camera_2_cpp"], store)
-__GLOBAL__sub_I_Runtime_Camera_3_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Camera_3_cpp"], store)
-__GLOBAL__sub_I_Runtime_Camera_4_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Camera_4_cpp"], store)
-__GLOBAL__sub_I_Runtime_Camera_5_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Camera_5_cpp"], store)
-__GLOBAL__sub_I_Runtime_Camera_6_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Camera_6_cpp"], store)
-__GLOBAL__sub_I_Runtime_Camera_7_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Camera_7_cpp"], store)
-__GLOBAL__sub_I_Shadows_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Shadows_cpp"], store)
-__GLOBAL__sub_I_Runtime_Camera_Culling_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Camera_Culling_0_cpp"], store)
-__GLOBAL__sub_I_GUITexture_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_GUITexture_cpp"], store)
-__GLOBAL__sub_I_Runtime_Camera_RenderLoops_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Camera_RenderLoops_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_Camera_RenderLoops_2_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Camera_RenderLoops_2_cpp"], store)
-__GLOBAL__sub_I_Runtime_Containers_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Containers_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_Core_Callbacks_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Core_Callbacks_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_File_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_File_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_Geometry_2_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Geometry_2_cpp"], store)
-__GLOBAL__sub_I_Runtime_Graphics_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Graphics_0_cpp"], store)
-___cxx_global_var_init_98 = partial(instance.exports(store)["___cxx_global_var_init_98"], store)
-__GLOBAL__sub_I_Runtime_Graphics_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Graphics_1_cpp"], store)
-__GLOBAL__sub_I_Runtime_Graphics_2_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Graphics_2_cpp"], store)
-__GLOBAL__sub_I_Runtime_Graphics_4_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Graphics_4_cpp"], store)
-__GLOBAL__sub_I_Runtime_Graphics_5_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Graphics_5_cpp"], store)
-__GLOBAL__sub_I_Runtime_Graphics_6_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Graphics_6_cpp"], store)
-__GLOBAL__sub_I_Runtime_Graphics_8_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Graphics_8_cpp"], store)
-__GLOBAL__sub_I_Runtime_Graphics_10_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Graphics_10_cpp"], store)
-__GLOBAL__sub_I_Runtime_Graphics_11_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Graphics_11_cpp"], store)
-__GLOBAL__sub_I_Runtime_Graphics_Billboard_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Graphics_Billboard_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_Graphics_LOD_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Graphics_LOD_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_Graphics_Mesh_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Graphics_Mesh_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_Graphics_Mesh_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Graphics_Mesh_1_cpp"], store)
-__GLOBAL__sub_I_Runtime_Graphics_Mesh_2_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Graphics_Mesh_2_cpp"], store)
-__GLOBAL__sub_I_Runtime_Graphics_Mesh_4_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Graphics_Mesh_4_cpp"], store)
-__GLOBAL__sub_I_Runtime_Graphics_Mesh_5_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Graphics_Mesh_5_cpp"], store)
-__GLOBAL__sub_I_Runtime_Graphics_ScriptableRenderLoop_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Graphics_ScriptableRenderLoop_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_Interfaces_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Interfaces_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_Interfaces_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Interfaces_1_cpp"], store)
-__GLOBAL__sub_I_Runtime_Interfaces_2_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Interfaces_2_cpp"], store)
-__GLOBAL__sub_I_Runtime_Jobs_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Jobs_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_Jobs_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Jobs_1_cpp"], store)
-__GLOBAL__sub_I_Runtime_Jobs_Internal_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Jobs_Internal_1_cpp"], store)
-__GLOBAL__sub_I_Runtime_Jobs_ScriptBindings_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Jobs_ScriptBindings_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_Math_2_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Math_2_cpp"], store)
-__GLOBAL__sub_I_Runtime_Math_Random_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Math_Random_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_Misc_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Misc_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_Misc_2_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Misc_2_cpp"], store)
-___cxx_global_var_init_131 = partial(instance.exports(store)["___cxx_global_var_init_131"], store)
-__GLOBAL__sub_I_Runtime_Misc_4_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Misc_4_cpp"], store)
-__GLOBAL__sub_I_Runtime_Misc_5_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Misc_5_cpp"], store)
-__GLOBAL__sub_I_Runtime_PreloadManager_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_PreloadManager_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_Profiler_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Profiler_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_Profiler_2_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Profiler_2_cpp"], store)
-__GLOBAL__sub_I_Runtime_Profiler_ScriptBindings_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Profiler_ScriptBindings_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_SceneManager_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_SceneManager_0_cpp"], store)
-___cxx_global_var_init_8100 = partial(instance.exports(store)["___cxx_global_var_init_8100"], store)
-__GLOBAL__sub_I_Runtime_Shaders_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Shaders_1_cpp"], store)
-__GLOBAL__sub_I_Runtime_Shaders_3_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Shaders_3_cpp"], store)
-__GLOBAL__sub_I_Runtime_Shaders_4_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Shaders_4_cpp"], store)
-__GLOBAL__sub_I_Runtime_Shaders_ShaderImpl_2_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Shaders_ShaderImpl_2_cpp"], store)
-__GLOBAL__sub_I_Runtime_Transform_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Transform_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_Transform_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Transform_1_cpp"], store)
-__GLOBAL__sub_I_Runtime_Utilities_2_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Utilities_2_cpp"], store)
-___cxx_global_var_init_2_9504 = partial(instance.exports(store)["___cxx_global_var_init_2_9504"], store)
-__GLOBAL__sub_I_Runtime_Utilities_5_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Utilities_5_cpp"], store)
-__GLOBAL__sub_I_Runtime_Utilities_6_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Utilities_6_cpp"], store)
-__GLOBAL__sub_I_Runtime_Utilities_7_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Utilities_7_cpp"], store)
-__GLOBAL__sub_I_Runtime_Utilities_9_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Utilities_9_cpp"], store)
-__GLOBAL__sub_I_AssetBundleFileSystem_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_AssetBundleFileSystem_cpp"], store)
-__GLOBAL__sub_I_Runtime_Modules_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Modules_0_cpp"], store)
-___cxx_global_var_init_13 = partial(instance.exports(store)["___cxx_global_var_init_13"], store)
-___cxx_global_var_init_14 = partial(instance.exports(store)["___cxx_global_var_init_14"], store)
-___cxx_global_var_init_15 = partial(instance.exports(store)["___cxx_global_var_init_15"], store)
-__GLOBAL__sub_I_Modules_Profiler_Public_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_Profiler_Public_0_cpp"], store)
-__GLOBAL__sub_I_Modules_Profiler_Runtime_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_Profiler_Runtime_1_cpp"], store)
-__GLOBAL__sub_I_UnsafeUtility_bindings_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_UnsafeUtility_bindings_cpp"], store)
-__GLOBAL__sub_I_Runtime_GfxDevice_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_GfxDevice_1_cpp"], store)
-__GLOBAL__sub_I_Runtime_GfxDevice_2_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_GfxDevice_2_cpp"], store)
-__GLOBAL__sub_I_Runtime_GfxDevice_3_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_GfxDevice_3_cpp"], store)
-__GLOBAL__sub_I_Runtime_GfxDevice_4_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_GfxDevice_4_cpp"], store)
-__GLOBAL__sub_I_Runtime_GfxDevice_5_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_GfxDevice_5_cpp"], store)
-__GLOBAL__sub_I_Runtime_PluginInterface_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_PluginInterface_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_Director_Core_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Director_Core_1_cpp"], store)
-__GLOBAL__sub_I_Runtime_ScriptingBackend_Il2Cpp_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_ScriptingBackend_Il2Cpp_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_Scripting_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Scripting_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_Scripting_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Scripting_1_cpp"], store)
-__GLOBAL__sub_I_Runtime_Scripting_2_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Scripting_2_cpp"], store)
-__GLOBAL__sub_I_Runtime_Scripting_3_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Scripting_3_cpp"], store)
-__GLOBAL__sub_I_Runtime_Mono_2_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Mono_2_cpp"], store)
-__GLOBAL__sub_I_Runtime_Mono_SerializationBackend_DirectMemoryAccess_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Mono_SerializationBackend_DirectMemoryAccess_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_Mono_SerializationBackend_DirectMemoryAccess_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Mono_SerializationBackend_DirectMemoryAccess_1_cpp"], store)
-__GLOBAL__sub_I_TemplateInstantiations_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_TemplateInstantiations_cpp"], store)
-__GLOBAL__sub_I_Runtime_Scripting_APIUpdating_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Scripting_APIUpdating_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_Serialize_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Serialize_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_Serialize_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Serialize_1_cpp"], store)
-__GLOBAL__sub_I_Runtime_Serialize_2_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Serialize_2_cpp"], store)
-__GLOBAL__sub_I_Runtime_Serialize_TransferFunctions_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Serialize_TransferFunctions_0_cpp"], store)
-__GLOBAL__sub_I_Runtime_Serialize_TransferFunctions_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Runtime_Serialize_TransferFunctions_1_cpp"], store)
-__GLOBAL__sub_I_PlatformDependent_WebGL_Source_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_PlatformDependent_WebGL_Source_0_cpp"], store)
-__GLOBAL__sub_I_PlatformDependent_WebGL_Source_2_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_PlatformDependent_WebGL_Source_2_cpp"], store)
-__GLOBAL__sub_I_LogAssert_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_LogAssert_cpp"], store)
-__GLOBAL__sub_I_Shader_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Shader_cpp"], store)
-__GLOBAL__sub_I_Transform_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Transform_cpp"], store)
-__GLOBAL__sub_I_PlatformDependent_WebGL_External_baselib_builds_Source_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_PlatformDependent_WebGL_External_baselib_builds_Source_0_cpp"], store)
-_SendMessage = partial(instance.exports(store)["_SendMessage"], store)
-_SendMessageString = partial(instance.exports(store)["_SendMessageString"], store)
-_SetFullscreen = partial(instance.exports(store)["_SetFullscreen"], store)
-_main = partial(instance.exports(store)["_main"], store)
-__GLOBAL__sub_I_Modules_DSPGraph_Public_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_DSPGraph_Public_1_cpp"], store)
-__GLOBAL__sub_I_DirectorScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_DirectorScriptingClasses_cpp"], store)
-__GLOBAL__sub_I_GridScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_GridScriptingClasses_cpp"], store)
-__GLOBAL__sub_I_Modules_Grid_Public_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_Grid_Public_0_cpp"], store)
-__GLOBAL__sub_I_IMGUIScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_IMGUIScriptingClasses_cpp"], store)
-__GLOBAL__sub_I_Modules_IMGUI_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_IMGUI_0_cpp"], store)
-___cxx_global_var_init_22 = partial(instance.exports(store)["___cxx_global_var_init_22"], store)
-__GLOBAL__sub_I_Modules_IMGUI_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_IMGUI_1_cpp"], store)
-___cxx_global_var_init_3893 = partial(instance.exports(store)["___cxx_global_var_init_3893"], store)
-__GLOBAL__sub_I_InputLegacyScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_InputLegacyScriptingClasses_cpp"], store)
-__GLOBAL__sub_I_InputScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_InputScriptingClasses_cpp"], store)
-__GLOBAL__sub_I_Modules_Input_Private_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_Input_Private_0_cpp"], store)
-__GLOBAL__sub_I_ParticleSystemScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_ParticleSystemScriptingClasses_cpp"], store)
-__GLOBAL__sub_I_Modules_ParticleSystem_Modules_3_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_ParticleSystem_Modules_3_cpp"], store)
-__GLOBAL__sub_I_ParticleSystemRenderer_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_ParticleSystemRenderer_cpp"], store)
-__GLOBAL__sub_I_ShapeModule_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_ShapeModule_cpp"], store)
-__GLOBAL__sub_I_Physics2DScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Physics2DScriptingClasses_cpp"], store)
-__GLOBAL__sub_I_Modules_Physics2D_Public_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_Physics2D_Public_0_cpp"], store)
-__GLOBAL__sub_I_Modules_Physics2D_Public_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_Physics2D_Public_1_cpp"], store)
-__GLOBAL__sub_I_PhysicsScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_PhysicsScriptingClasses_cpp"], store)
-__GLOBAL__sub_I_Modules_Physics_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_Physics_0_cpp"], store)
-__GLOBAL__sub_I_Modules_Physics_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_Physics_1_cpp"], store)
-__GLOBAL__sub_I_PhysicsQuery_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_PhysicsQuery_cpp"], store)
-__GLOBAL__sub_I_SubsystemsScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_SubsystemsScriptingClasses_cpp"], store)
-__GLOBAL__sub_I_Modules_Subsystems_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_Subsystems_0_cpp"], store)
-__GLOBAL__sub_I_TerrainScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_TerrainScriptingClasses_cpp"], store)
-__GLOBAL__sub_I_Modules_Terrain_Public_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_Terrain_Public_0_cpp"], store)
-___cxx_global_var_init_69 = partial(instance.exports(store)["___cxx_global_var_init_69"], store)
-__GLOBAL__sub_I_Modules_Terrain_Public_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_Terrain_Public_1_cpp"], store)
-__GLOBAL__sub_I_Modules_Terrain_Public_2_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_Terrain_Public_2_cpp"], store)
-__GLOBAL__sub_I_Modules_Terrain_Public_3_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_Terrain_Public_3_cpp"], store)
-__GLOBAL__sub_I_Modules_Terrain_VR_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_Terrain_VR_0_cpp"], store)
-__GLOBAL__sub_I_TextCoreScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_TextCoreScriptingClasses_cpp"], store)
-__GLOBAL__sub_I_Modules_TextCore_Native_FontEngine_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_TextCore_Native_FontEngine_0_cpp"], store)
-__GLOBAL__sub_I_TextRenderingScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_TextRenderingScriptingClasses_cpp"], store)
-__GLOBAL__sub_I_Modules_TextRendering_Public_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_TextRendering_Public_0_cpp"], store)
-__GLOBAL__sub_I_TilemapScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_TilemapScriptingClasses_cpp"], store)
-__GLOBAL__sub_I_Modules_Tilemap_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_Tilemap_0_cpp"], store)
-__GLOBAL__sub_I_Modules_Tilemap_Public_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_Tilemap_Public_0_cpp"], store)
-__GLOBAL__sub_I_UIElementsScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_UIElementsScriptingClasses_cpp"], store)
-__GLOBAL__sub_I_External_Yoga_Yoga_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_External_Yoga_Yoga_0_cpp"], store)
-__GLOBAL__sub_I_UIScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_UIScriptingClasses_cpp"], store)
-__GLOBAL__sub_I_Modules_UI_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_UI_0_cpp"], store)
-__GLOBAL__sub_I_Modules_UI_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_UI_1_cpp"], store)
-__GLOBAL__sub_I_Modules_UI_2_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_UI_2_cpp"], store)
-__GLOBAL__sub_I_umbra_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_umbra_cpp"], store)
-__GLOBAL__sub_I_UnityAnalyticsScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_UnityAnalyticsScriptingClasses_cpp"], store)
-__GLOBAL__sub_I_Modules_UnityAnalytics_Dispatcher_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_UnityAnalytics_Dispatcher_0_cpp"], store)
-__GLOBAL__sub_I_UnityAdsSettings_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_UnityAdsSettings_cpp"], store)
-__GLOBAL__sub_I_UnityWebRequestScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_UnityWebRequestScriptingClasses_cpp"], store)
-__GLOBAL__sub_I_Modules_UnityWebRequest_Public_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_UnityWebRequest_Public_0_cpp"], store)
-__GLOBAL__sub_I_VFXScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_VFXScriptingClasses_cpp"], store)
-__GLOBAL__sub_I_Modules_VFX_Public_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_VFX_Public_1_cpp"], store)
-__GLOBAL__sub_I_Modules_VFX_Public_2_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_VFX_Public_2_cpp"], store)
-__GLOBAL__sub_I_VRScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_VRScriptingClasses_cpp"], store)
-__GLOBAL__sub_I_Modules_VR_2_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_VR_2_cpp"], store)
-__GLOBAL__sub_I_Modules_VR_PluginInterface_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_VR_PluginInterface_0_cpp"], store)
-__GLOBAL__sub_I_VideoScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_VideoScriptingClasses_cpp"], store)
-__GLOBAL__sub_I_Modules_Video_Public_Base_0_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_Video_Public_Base_0_cpp"], store)
-__GLOBAL__sub_I_Wind_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Wind_cpp"], store)
-__GLOBAL__sub_I_XRScriptingClasses_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_XRScriptingClasses_cpp"], store)
-__GLOBAL__sub_I_Modules_XR_Subsystems_Input_Public_1_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Modules_XR_Subsystems_Input_Public_1_cpp"], store)
-__GLOBAL__sub_I_Lump_libil2cpp_os_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Lump_libil2cpp_os_cpp"], store)
-__GLOBAL__sub_I_Il2CppCodeRegistration_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Il2CppCodeRegistration_cpp"], store)
-__GLOBAL__sub_I_Lump_libil2cpp_vm_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Lump_libil2cpp_vm_cpp"], store)
-__GLOBAL__sub_I_Lump_libil2cpp_metadata_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Lump_libil2cpp_metadata_cpp"], store)
-__GLOBAL__sub_I_Lump_libil2cpp_utils_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Lump_libil2cpp_utils_cpp"], store)
-__GLOBAL__sub_I_Lump_libil2cpp_gc_cpp = partial(instance.exports(store)["__GLOBAL__sub_I_Lump_libil2cpp_gc_cpp"], store)
-_malloc = partial(instance.exports(store)["_malloc"], store)
-_free = partial(instance.exports(store)["_free"], store)
-_realloc = partial(instance.exports(store)["_realloc"], store)
-_memalign = partial(instance.exports(store)["_memalign"], store)
-___errno_location = partial(instance.exports(store)["___errno_location"], store)
-_strlen = partial(instance.exports(store)["_strlen"], store)
-_ntohs = partial(instance.exports(store)["_ntohs"], store)
-_htonl = partial(instance.exports(store)["_htonl"], store)
-___emscripten_environ_constructor = partial(instance.exports(store)["___emscripten_environ_constructor"], store)
-__get_tzname = partial(instance.exports(store)["__get_tzname"], store)
-__get_daylight = partial(instance.exports(store)["__get_daylight"], store)
-__get_timezone = partial(instance.exports(store)["__get_timezone"], store)
-__get_environ = partial(instance.exports(store)["__get_environ"], store)
-___cxa_can_catch = partial(instance.exports(store)["___cxa_can_catch"], store)
-___cxa_is_pointer_type = partial(instance.exports(store)["___cxa_is_pointer_type"], store)
-_i64Add = partial(instance.exports(store)["_i64Add"], store)
-_saveSetjmp = partial(instance.exports(store)["_saveSetjmp"], store)
-_testSetjmp = partial(instance.exports(store)["_testSetjmp"], store)
-_llvm_bswap_i32 = partial(instance.exports(store)["_llvm_bswap_i32"], store)
-_llvm_ctlz_i64 = partial(instance.exports(store)["_llvm_ctlz_i64"], store)
-_llvm_ctpop_i32 = partial(instance.exports(store)["_llvm_ctpop_i32"], store)
-_llvm_maxnum_f64 = partial(instance.exports(store)["_llvm_maxnum_f64"], store)
-_llvm_minnum_f32 = partial(instance.exports(store)["_llvm_minnum_f32"], store)
-_llvm_round_f32 = partial(instance.exports(store)["_llvm_round_f32"], store)
-_memcpy = partial(instance.exports(store)["_memcpy"], store)
-_memmove = partial(instance.exports(store)["_memmove"], store)
-_memset = partial(instance.exports(store)["_memset"], store)
-_rintf = partial(instance.exports(store)["_rintf"], store)
-_sbrk = partial(instance.exports(store)["_sbrk"], store)
-dynCall_dddi = partial(instance.exports(store)["dynCall_dddi"], store)
-dynCall_ddi = partial(instance.exports(store)["dynCall_ddi"], store)
-dynCall_ddidi = partial(instance.exports(store)["dynCall_ddidi"], store)
-dynCall_ddii = partial(instance.exports(store)["dynCall_ddii"], store)
-dynCall_ddiii = partial(instance.exports(store)["dynCall_ddiii"], store)
-dynCall_di = partial(instance.exports(store)["dynCall_di"], store)
-dynCall_diddi = partial(instance.exports(store)["dynCall_diddi"], store)
-dynCall_didi = partial(instance.exports(store)["dynCall_didi"], store)
-dynCall_dii = partial(instance.exports(store)["dynCall_dii"], store)
-dynCall_diidi = partial(instance.exports(store)["dynCall_diidi"], store)
-dynCall_diii = partial(instance.exports(store)["dynCall_diii"], store)
-dynCall_diiid = partial(instance.exports(store)["dynCall_diiid"], store)
-dynCall_diiii = partial(instance.exports(store)["dynCall_diiii"], store)
-dynCall_diiiii = partial(instance.exports(store)["dynCall_diiiii"], store)
-dynCall_i = partial(instance.exports(store)["dynCall_i"], store)
-dynCall_idddi = partial(instance.exports(store)["dynCall_idddi"], store)
-dynCall_iddi = partial(instance.exports(store)["dynCall_iddi"], store)
-dynCall_iddii = partial(instance.exports(store)["dynCall_iddii"], store)
-dynCall_idi = partial(instance.exports(store)["dynCall_idi"], store)
-dynCall_idii = partial(instance.exports(store)["dynCall_idii"], store)
-dynCall_idiii = partial(instance.exports(store)["dynCall_idiii"], store)
-dynCall_idiiii = partial(instance.exports(store)["dynCall_idiiii"], store)
-dynCall_ii = partial(instance.exports(store)["dynCall_ii"], store)
-dynCall_iiddi = partial(instance.exports(store)["dynCall_iiddi"], store)
-dynCall_iidi = partial(instance.exports(store)["dynCall_iidi"], store)
-dynCall_iidii = partial(instance.exports(store)["dynCall_iidii"], store)
-dynCall_iidiii = partial(instance.exports(store)["dynCall_iidiii"], store)
-dynCall_iii = partial(instance.exports(store)["dynCall_iii"], store)
-dynCall_iiiddi = partial(instance.exports(store)["dynCall_iiiddi"], store)
-dynCall_iiidi = partial(instance.exports(store)["dynCall_iiidi"], store)
-dynCall_iiidii = partial(instance.exports(store)["dynCall_iiidii"], store)
-dynCall_iiidiii = partial(instance.exports(store)["dynCall_iiidiii"], store)
-dynCall_iiii = partial(instance.exports(store)["dynCall_iiii"], store)
-dynCall_iiiii = partial(instance.exports(store)["dynCall_iiiii"], store)
-dynCall_iiiiidii = partial(instance.exports(store)["dynCall_iiiiidii"], store)
-dynCall_iiiiii = partial(instance.exports(store)["dynCall_iiiiii"], store)
-dynCall_iiiiiii = partial(instance.exports(store)["dynCall_iiiiiii"], store)
-dynCall_iiiiiiii = partial(instance.exports(store)["dynCall_iiiiiiii"], store)
-dynCall_iiiiiiiii = partial(instance.exports(store)["dynCall_iiiiiiiii"], store)
-dynCall_iiiiiiiiii = partial(instance.exports(store)["dynCall_iiiiiiiiii"], store)
-dynCall_iiiiiiiiiii = partial(instance.exports(store)["dynCall_iiiiiiiiiii"], store)
-dynCall_iiiiiiiiiiii = partial(instance.exports(store)["dynCall_iiiiiiiiiiii"], store)
-dynCall_iiiiiiiiiiiii = partial(instance.exports(store)["dynCall_iiiiiiiiiiiii"], store)
-dynCall_iiiiiiiiiiiiii = partial(instance.exports(store)["dynCall_iiiiiiiiiiiiii"], store)
-dynCall_iiiiiiiiiiiiiii = partial(instance.exports(store)["dynCall_iiiiiiiiiiiiiii"], store)
-dynCall_iiiiiiiiiiiiiiii = partial(instance.exports(store)["dynCall_iiiiiiiiiiiiiiii"], store)
-dynCall_iiiiiiiiiiiiiiiii = partial(instance.exports(store)["dynCall_iiiiiiiiiiiiiiiii"], store)
-dynCall_iiiiiiiiiiiiiiiiii = partial(instance.exports(store)["dynCall_iiiiiiiiiiiiiiiiii"], store)
-dynCall_iiiiiiiiiiiiiiiiiii = partial(instance.exports(store)["dynCall_iiiiiiiiiiiiiiiiiii"], store)
-dynCall_iiiiiiiiiiiiiiiiiiii = partial(instance.exports(store)["dynCall_iiiiiiiiiiiiiiiiiiii"], store)
-dynCall_iiiiiiiiiiiiiiiiiiiii = partial(instance.exports(store)["dynCall_iiiiiiiiiiiiiiiiiiiii"], store)
-dynCall_v = partial(instance.exports(store)["dynCall_v"], store)
-dynCall_vd = partial(instance.exports(store)["dynCall_vd"], store)
-dynCall_vdi = partial(instance.exports(store)["dynCall_vdi"], store)
-dynCall_vi = partial(instance.exports(store)["dynCall_vi"], store)
-dynCall_vid = partial(instance.exports(store)["dynCall_vid"], store)
-dynCall_vidd = partial(instance.exports(store)["dynCall_vidd"], store)
-dynCall_vidddi = partial(instance.exports(store)["dynCall_vidddi"], store)
-dynCall_viddi = partial(instance.exports(store)["dynCall_viddi"], store)
-dynCall_viddiiii = partial(instance.exports(store)["dynCall_viddiiii"], store)
-dynCall_vidi = partial(instance.exports(store)["dynCall_vidi"], store)
-dynCall_vidii = partial(instance.exports(store)["dynCall_vidii"], store)
-dynCall_vidiii = partial(instance.exports(store)["dynCall_vidiii"], store)
-dynCall_vii = partial(instance.exports(store)["dynCall_vii"], store)
-dynCall_viid = partial(instance.exports(store)["dynCall_viid"], store)
-dynCall_viidd = partial(instance.exports(store)["dynCall_viidd"], store)
-dynCall_viidi = partial(instance.exports(store)["dynCall_viidi"], store)
-dynCall_viidii = partial(instance.exports(store)["dynCall_viidii"], store)
-dynCall_viii = partial(instance.exports(store)["dynCall_viii"], store)
-dynCall_viiidi = partial(instance.exports(store)["dynCall_viiidi"], store)
-dynCall_viiii = partial(instance.exports(store)["dynCall_viiii"], store)
-dynCall_viiiiddi = partial(instance.exports(store)["dynCall_viiiiddi"], store)
-dynCall_viiiii = partial(instance.exports(store)["dynCall_viiiii"], store)
-dynCall_viiiiii = partial(instance.exports(store)["dynCall_viiiiii"], store)
-dynCall_viiiiiii = partial(instance.exports(store)["dynCall_viiiiiii"], store)
-dynCall_viiiiiiii = partial(instance.exports(store)["dynCall_viiiiiiii"], store)
-dynCall_viiiiiiiii = partial(instance.exports(store)["dynCall_viiiiiiiii"], store)
-dynCall_viiiiiiiiii = partial(instance.exports(store)["dynCall_viiiiiiiiii"], store)
-dynCall_viiiiiiiiiii = partial(instance.exports(store)["dynCall_viiiiiiiiiii"], store)
-dynCall_viiiiiiiiiiii = partial(instance.exports(store)["dynCall_viiiiiiiiiiii"], store)
-dynCall_viiiiiiiiiiiii = partial(instance.exports(store)["dynCall_viiiiiiiiiiiii"], store)
-dynCall_viiiiiiiiiiiiii = partial(instance.exports(store)["dynCall_viiiiiiiiiiiiii"], store)
-dynCall_viiiiiiiiiiiiiii = partial(instance.exports(store)["dynCall_viiiiiiiiiiiiiii"], store)
-dynCall_viiiiiiiiiiiiiiii = partial(instance.exports(store)["dynCall_viiiiiiiiiiiiiiii"], store)
-dynCall_viiiiiiiiiiiiiiiii = partial(instance.exports(store)["dynCall_viiiiiiiiiiiiiiiii"], store)
-dynCall_viiiiiiiiiiiiiiiiii = partial(instance.exports(store)["dynCall_viiiiiiiiiiiiiiiiii"], store)
-_SendMessageFloat = partial(instance.exports(store)["_SendMessageFloat"], store)
-dynCall_dfi = partial(instance.exports(store)["dynCall_dfi"], store)
-dynCall_dij = partial(instance.exports(store)["dynCall_dij"], store)
-dynCall_diji = partial(instance.exports(store)["dynCall_diji"], store)
-dynCall_dji = partial(instance.exports(store)["dynCall_dji"], store)
-dynCall_f = partial(instance.exports(store)["dynCall_f"], store)
-dynCall_fdi = partial(instance.exports(store)["dynCall_fdi"], store)
-dynCall_ff = partial(instance.exports(store)["dynCall_ff"], store)
-dynCall_fff = partial(instance.exports(store)["dynCall_fff"], store)
-dynCall_ffff = partial(instance.exports(store)["dynCall_ffff"], store)
-dynCall_fffff = partial(instance.exports(store)["dynCall_fffff"], store)
-dynCall_ffffffi = partial(instance.exports(store)["dynCall_ffffffi"], store)
-dynCall_fffffi = partial(instance.exports(store)["dynCall_fffffi"], store)
-dynCall_ffffi = partial(instance.exports(store)["dynCall_ffffi"], store)
-dynCall_ffffii = partial(instance.exports(store)["dynCall_ffffii"], store)
-dynCall_fffi = partial(instance.exports(store)["dynCall_fffi"], store)
-dynCall_fffiffffffi = partial(instance.exports(store)["dynCall_fffiffffffi"], store)
-dynCall_fffifffffi = partial(instance.exports(store)["dynCall_fffifffffi"], store)
-dynCall_fffifffi = partial(instance.exports(store)["dynCall_fffifffi"], store)
-dynCall_fffifi = partial(instance.exports(store)["dynCall_fffifi"], store)
-dynCall_fffii = partial(instance.exports(store)["dynCall_fffii"], store)
-dynCall_fffiii = partial(instance.exports(store)["dynCall_fffiii"], store)
-dynCall_ffi = partial(instance.exports(store)["dynCall_ffi"], store)
-dynCall_fi = partial(instance.exports(store)["dynCall_fi"], store)
-dynCall_fidi = partial(instance.exports(store)["dynCall_fidi"], store)
-dynCall_fif = partial(instance.exports(store)["dynCall_fif"], store)
-dynCall_fiff = partial(instance.exports(store)["dynCall_fiff"], store)
-dynCall_fiffffi = partial(instance.exports(store)["dynCall_fiffffi"], store)
-dynCall_fifffi = partial(instance.exports(store)["dynCall_fifffi"], store)
-dynCall_fiffi = partial(instance.exports(store)["dynCall_fiffi"], store)
-dynCall_fifi = partial(instance.exports(store)["dynCall_fifi"], store)
-dynCall_fifii = partial(instance.exports(store)["dynCall_fifii"], store)
-dynCall_fii = partial(instance.exports(store)["dynCall_fii"], store)
-dynCall_fiif = partial(instance.exports(store)["dynCall_fiif"], store)
-dynCall_fiifdi = partial(instance.exports(store)["dynCall_fiifdi"], store)
-dynCall_fiiffffi = partial(instance.exports(store)["dynCall_fiiffffi"], store)
-dynCall_fiiffi = partial(instance.exports(store)["dynCall_fiiffi"], store)
-dynCall_fiifi = partial(instance.exports(store)["dynCall_fiifi"], store)
-dynCall_fiifii = partial(instance.exports(store)["dynCall_fiifii"], store)
-dynCall_fiifji = partial(instance.exports(store)["dynCall_fiifji"], store)
-dynCall_fiii = partial(instance.exports(store)["dynCall_fiii"], store)
-dynCall_fiiif = partial(instance.exports(store)["dynCall_fiiif"], store)
-dynCall_fiiii = partial(instance.exports(store)["dynCall_fiiii"], store)
-dynCall_fiiiif = partial(instance.exports(store)["dynCall_fiiiif"], store)
-dynCall_fiiiii = partial(instance.exports(store)["dynCall_fiiiii"], store)
-dynCall_fiiiiii = partial(instance.exports(store)["dynCall_fiiiiii"], store)
-dynCall_fiiiiiifiifif = partial(instance.exports(store)["dynCall_fiiiiiifiifif"], store)
-dynCall_fiiiiiifiiiif = partial(instance.exports(store)["dynCall_fiiiiiifiiiif"], store)
-dynCall_fji = partial(instance.exports(store)["dynCall_fji"], store)
-dynCall_iffffffi = partial(instance.exports(store)["dynCall_iffffffi"], store)
-dynCall_iffffi = partial(instance.exports(store)["dynCall_iffffi"], store)
-dynCall_ifffi = partial(instance.exports(store)["dynCall_ifffi"], store)
-dynCall_iffi = partial(instance.exports(store)["dynCall_iffi"], store)
-dynCall_ifi = partial(instance.exports(store)["dynCall_ifi"], store)
-dynCall_ifii = partial(instance.exports(store)["dynCall_ifii"], store)
-dynCall_ifiii = partial(instance.exports(store)["dynCall_ifiii"], store)
-dynCall_ifiiii = partial(instance.exports(store)["dynCall_ifiiii"], store)
-dynCall_iif = partial(instance.exports(store)["dynCall_iif"], store)
-dynCall_iiff = partial(instance.exports(store)["dynCall_iiff"], store)
-dynCall_iifff = partial(instance.exports(store)["dynCall_iifff"], store)
-dynCall_iiffffffiii = partial(instance.exports(store)["dynCall_iiffffffiii"], store)
-dynCall_iiffffi = partial(instance.exports(store)["dynCall_iiffffi"], store)
-dynCall_iiffffiii = partial(instance.exports(store)["dynCall_iiffffiii"], store)
-dynCall_iifffi = partial(instance.exports(store)["dynCall_iifffi"], store)
-dynCall_iifffiii = partial(instance.exports(store)["dynCall_iifffiii"], store)
-dynCall_iiffi = partial(instance.exports(store)["dynCall_iiffi"], store)
-dynCall_iiffifiii = partial(instance.exports(store)["dynCall_iiffifiii"], store)
-dynCall_iiffii = partial(instance.exports(store)["dynCall_iiffii"], store)
-dynCall_iiffiii = partial(instance.exports(store)["dynCall_iiffiii"], store)
-dynCall_iiffiiiii = partial(instance.exports(store)["dynCall_iiffiiiii"], store)
-dynCall_iifi = partial(instance.exports(store)["dynCall_iifi"], store)
-dynCall_iifii = partial(instance.exports(store)["dynCall_iifii"], store)
-dynCall_iifiifii = partial(instance.exports(store)["dynCall_iifiifii"], store)
-dynCall_iifiifiii = partial(instance.exports(store)["dynCall_iifiifiii"], store)
-dynCall_iifiii = partial(instance.exports(store)["dynCall_iifiii"], store)
-dynCall_iifiiii = partial(instance.exports(store)["dynCall_iifiiii"], store)
-dynCall_iifiiiii = partial(instance.exports(store)["dynCall_iifiiiii"], store)
-dynCall_iifiiiiii = partial(instance.exports(store)["dynCall_iifiiiiii"], store)
-dynCall_iiif = partial(instance.exports(store)["dynCall_iiif"], store)
-dynCall_iiiffffi = partial(instance.exports(store)["dynCall_iiiffffi"], store)
-dynCall_iiifffi = partial(instance.exports(store)["dynCall_iiifffi"], store)
-dynCall_iiifffii = partial(instance.exports(store)["dynCall_iiifffii"], store)
-dynCall_iiiffi = partial(instance.exports(store)["dynCall_iiiffi"], store)
-dynCall_iiiffifiii = partial(instance.exports(store)["dynCall_iiiffifiii"], store)
-dynCall_iiiffii = partial(instance.exports(store)["dynCall_iiiffii"], store)
-dynCall_iiiffiii = partial(instance.exports(store)["dynCall_iiiffiii"], store)
-dynCall_iiifi = partial(instance.exports(store)["dynCall_iiifi"], store)
-dynCall_iiififi = partial(instance.exports(store)["dynCall_iiififi"], store)
-dynCall_iiififii = partial(instance.exports(store)["dynCall_iiififii"], store)
-dynCall_iiififiii = partial(instance.exports(store)["dynCall_iiififiii"], store)
-dynCall_iiififiiii = partial(instance.exports(store)["dynCall_iiififiiii"], store)
-dynCall_iiifii = partial(instance.exports(store)["dynCall_iiifii"], store)
-dynCall_iiifiifii = partial(instance.exports(store)["dynCall_iiifiifii"], store)
-dynCall_iiifiifiii = partial(instance.exports(store)["dynCall_iiifiifiii"], store)
-dynCall_iiifiifiiii = partial(instance.exports(store)["dynCall_iiifiifiiii"], store)
-dynCall_iiifiii = partial(instance.exports(store)["dynCall_iiifiii"], store)
-dynCall_iiifiiii = partial(instance.exports(store)["dynCall_iiifiiii"], store)
-dynCall_iiifiiiii = partial(instance.exports(store)["dynCall_iiifiiiii"], store)
-dynCall_iiiifffffi = partial(instance.exports(store)["dynCall_iiiifffffi"], store)
-dynCall_iiiifffffii = partial(instance.exports(store)["dynCall_iiiifffffii"], store)
-dynCall_iiiiffffi = partial(instance.exports(store)["dynCall_iiiiffffi"], store)
-dynCall_iiiiffi = partial(instance.exports(store)["dynCall_iiiiffi"], store)
-dynCall_iiiiffii = partial(instance.exports(store)["dynCall_iiiiffii"], store)
-dynCall_iiiifi = partial(instance.exports(store)["dynCall_iiiifi"], store)
-dynCall_iiiififi = partial(instance.exports(store)["dynCall_iiiififi"], store)
-dynCall_iiiifii = partial(instance.exports(store)["dynCall_iiiifii"], store)
-dynCall_iiiifiii = partial(instance.exports(store)["dynCall_iiiifiii"], store)
-dynCall_iiiifiiii = partial(instance.exports(store)["dynCall_iiiifiiii"], store)
-dynCall_iiiifiiiii = partial(instance.exports(store)["dynCall_iiiifiiiii"], store)
-dynCall_iiiiifi = partial(instance.exports(store)["dynCall_iiiiifi"], store)
-dynCall_iiiiifii = partial(instance.exports(store)["dynCall_iiiiifii"], store)
-dynCall_iiiiifiii = partial(instance.exports(store)["dynCall_iiiiifiii"], store)
-dynCall_iiiiifiiiiif = partial(instance.exports(store)["dynCall_iiiiifiiiiif"], store)
-dynCall_iiiiiifff = partial(instance.exports(store)["dynCall_iiiiiifff"], store)
-dynCall_iiiiiifffiiifiii = partial(instance.exports(store)["dynCall_iiiiiifffiiifiii"], store)
-dynCall_iiiiiiffiiiiiiiiiffffiii = partial(instance.exports(store)["dynCall_iiiiiiffiiiiiiiiiffffiii"], store)
-dynCall_iiiiiiffiiiiiiiiiffffiiii = partial(instance.exports(store)["dynCall_iiiiiiffiiiiiiiiiffffiiii"], store)
-dynCall_iiiiiiffiiiiiiiiiiiiiii = partial(instance.exports(store)["dynCall_iiiiiiffiiiiiiiiiiiiiii"], store)
-dynCall_iiiiiifi = partial(instance.exports(store)["dynCall_iiiiiifi"], store)
-dynCall_iiiiiifiif = partial(instance.exports(store)["dynCall_iiiiiifiif"], store)
-dynCall_iiiiiifiii = partial(instance.exports(store)["dynCall_iiiiiifiii"], store)
-dynCall_iiiiiiifiif = partial(instance.exports(store)["dynCall_iiiiiiifiif"], store)
-dynCall_iiiiij = partial(instance.exports(store)["dynCall_iiiiij"], store)
-dynCall_iiiiiji = partial(instance.exports(store)["dynCall_iiiiiji"], store)
-dynCall_iiiij = partial(instance.exports(store)["dynCall_iiiij"], store)
-dynCall_iiiiji = partial(instance.exports(store)["dynCall_iiiiji"], store)
-dynCall_iiiijii = partial(instance.exports(store)["dynCall_iiiijii"], store)
-dynCall_iiiijiiii = partial(instance.exports(store)["dynCall_iiiijiiii"], store)
-dynCall_iiiijjii = partial(instance.exports(store)["dynCall_iiiijjii"], store)
-dynCall_iiiijjiiii = partial(instance.exports(store)["dynCall_iiiijjiiii"], store)
-dynCall_iiij = partial(instance.exports(store)["dynCall_iiij"], store)
-dynCall_iiiji = partial(instance.exports(store)["dynCall_iiiji"], store)
-dynCall_iiijii = partial(instance.exports(store)["dynCall_iiijii"], store)
-dynCall_iiijiii = partial(instance.exports(store)["dynCall_iiijiii"], store)
-dynCall_iiijji = partial(instance.exports(store)["dynCall_iiijji"], store)
-dynCall_iiijjii = partial(instance.exports(store)["dynCall_iiijjii"], store)
-dynCall_iiijjiii = partial(instance.exports(store)["dynCall_iiijjiii"], store)
-dynCall_iiijjiiii = partial(instance.exports(store)["dynCall_iiijjiiii"], store)
-dynCall_iij = partial(instance.exports(store)["dynCall_iij"], store)
-dynCall_iiji = partial(instance.exports(store)["dynCall_iiji"], store)
-dynCall_iijii = partial(instance.exports(store)["dynCall_iijii"], store)
-dynCall_iijiii = partial(instance.exports(store)["dynCall_iijiii"], store)
-dynCall_iijiiii = partial(instance.exports(store)["dynCall_iijiiii"], store)
-dynCall_iijiiiiii = partial(instance.exports(store)["dynCall_iijiiiiii"], store)
-dynCall_iijji = partial(instance.exports(store)["dynCall_iijji"], store)
-dynCall_iijjii = partial(instance.exports(store)["dynCall_iijjii"], store)
-dynCall_iijjiii = partial(instance.exports(store)["dynCall_iijjiii"], store)
-dynCall_iijjji = partial(instance.exports(store)["dynCall_iijjji"], store)
-dynCall_ij = partial(instance.exports(store)["dynCall_ij"], store)
-dynCall_iji = partial(instance.exports(store)["dynCall_iji"], store)
-dynCall_ijii = partial(instance.exports(store)["dynCall_ijii"], store)
-dynCall_ijiii = partial(instance.exports(store)["dynCall_ijiii"], store)
-dynCall_ijiiii = partial(instance.exports(store)["dynCall_ijiiii"], store)
-dynCall_ijj = partial(instance.exports(store)["dynCall_ijj"], store)
-dynCall_ijji = partial(instance.exports(store)["dynCall_ijji"], store)
-dynCall_j = partial(instance.exports(store)["dynCall_j"], store)
-dynCall_jdi = partial(instance.exports(store)["dynCall_jdi"], store)
-dynCall_jdii = partial(instance.exports(store)["dynCall_jdii"], store)
-dynCall_jfi = partial(instance.exports(store)["dynCall_jfi"], store)
-dynCall_ji = partial(instance.exports(store)["dynCall_ji"], store)
-dynCall_jid = partial(instance.exports(store)["dynCall_jid"], store)
-dynCall_jidi = partial(instance.exports(store)["dynCall_jidi"], store)
-dynCall_jidii = partial(instance.exports(store)["dynCall_jidii"], store)
-dynCall_jii = partial(instance.exports(store)["dynCall_jii"], store)
-dynCall_jiii = partial(instance.exports(store)["dynCall_jiii"], store)
-dynCall_jiiii = partial(instance.exports(store)["dynCall_jiiii"], store)
-dynCall_jiiiii = partial(instance.exports(store)["dynCall_jiiiii"], store)
-dynCall_jiiiiii = partial(instance.exports(store)["dynCall_jiiiiii"], store)
-dynCall_jiiiiiiiii = partial(instance.exports(store)["dynCall_jiiiiiiiii"], store)
-dynCall_jiiiiiiiiii = partial(instance.exports(store)["dynCall_jiiiiiiiiii"], store)
-dynCall_jiiij = partial(instance.exports(store)["dynCall_jiiij"], store)
-dynCall_jiiji = partial(instance.exports(store)["dynCall_jiiji"], store)
-dynCall_jiji = partial(instance.exports(store)["dynCall_jiji"], store)
-dynCall_jijii = partial(instance.exports(store)["dynCall_jijii"], store)
-dynCall_jijiii = partial(instance.exports(store)["dynCall_jijiii"], store)
-dynCall_jijj = partial(instance.exports(store)["dynCall_jijj"], store)
-dynCall_jijji = partial(instance.exports(store)["dynCall_jijji"], store)
-dynCall_jji = partial(instance.exports(store)["dynCall_jji"], store)
-dynCall_jjii = partial(instance.exports(store)["dynCall_jjii"], store)
-dynCall_jjji = partial(instance.exports(store)["dynCall_jjji"], store)
-dynCall_jjjji = partial(instance.exports(store)["dynCall_jjjji"], store)
-dynCall_vf = partial(instance.exports(store)["dynCall_vf"], store)
-dynCall_vff = partial(instance.exports(store)["dynCall_vff"], store)
-dynCall_vfff = partial(instance.exports(store)["dynCall_vfff"], store)
-dynCall_vffff = partial(instance.exports(store)["dynCall_vffff"], store)
-dynCall_vfffffffffiiii = partial(instance.exports(store)["dynCall_vfffffffffiiii"], store)
-dynCall_vffffi = partial(instance.exports(store)["dynCall_vffffi"], store)
-dynCall_vfffi = partial(instance.exports(store)["dynCall_vfffi"], store)
-dynCall_vffi = partial(instance.exports(store)["dynCall_vffi"], store)
-dynCall_vfi = partial(instance.exports(store)["dynCall_vfi"], store)
-dynCall_vfii = partial(instance.exports(store)["dynCall_vfii"], store)
-dynCall_vfiii = partial(instance.exports(store)["dynCall_vfiii"], store)
-dynCall_vfiiiii = partial(instance.exports(store)["dynCall_vfiiiii"], store)
-dynCall_vif = partial(instance.exports(store)["dynCall_vif"], store)
-dynCall_viff = partial(instance.exports(store)["dynCall_viff"], store)
-dynCall_vifff = partial(instance.exports(store)["dynCall_vifff"], store)
-dynCall_viffff = partial(instance.exports(store)["dynCall_viffff"], store)
-dynCall_viffffffffffffiiii = partial(instance.exports(store)["dynCall_viffffffffffffiiii"], store)
-dynCall_vifffffffi = partial(instance.exports(store)["dynCall_vifffffffi"], store)
-dynCall_viffffffi = partial(instance.exports(store)["dynCall_viffffffi"], store)
-dynCall_vifffffi = partial(instance.exports(store)["dynCall_vifffffi"], store)
-dynCall_viffffi = partial(instance.exports(store)["dynCall_viffffi"], store)
-dynCall_viffffii = partial(instance.exports(store)["dynCall_viffffii"], store)
-dynCall_viffffiifffiiiiif = partial(instance.exports(store)["dynCall_viffffiifffiiiiif"], store)
-dynCall_viffffiii = partial(instance.exports(store)["dynCall_viffffiii"], store)
-dynCall_vifffi = partial(instance.exports(store)["dynCall_vifffi"], store)
-dynCall_vifffii = partial(instance.exports(store)["dynCall_vifffii"], store)
-dynCall_viffi = partial(instance.exports(store)["dynCall_viffi"], store)
-dynCall_viffii = partial(instance.exports(store)["dynCall_viffii"], store)
-dynCall_viffiifffffiii = partial(instance.exports(store)["dynCall_viffiifffffiii"], store)
-dynCall_viffiii = partial(instance.exports(store)["dynCall_viffiii"], store)
-dynCall_viffiiifi = partial(instance.exports(store)["dynCall_viffiiifi"], store)
-dynCall_viffiiiif = partial(instance.exports(store)["dynCall_viffiiiif"], store)
-dynCall_vifi = partial(instance.exports(store)["dynCall_vifi"], store)
-dynCall_vififiii = partial(instance.exports(store)["dynCall_vififiii"], store)
-dynCall_vifii = partial(instance.exports(store)["dynCall_vifii"], store)
-dynCall_vifiii = partial(instance.exports(store)["dynCall_vifiii"], store)
-dynCall_vifiiii = partial(instance.exports(store)["dynCall_vifiiii"], store)
-dynCall_vifiiiii = partial(instance.exports(store)["dynCall_vifiiiii"], store)
-dynCall_viif = partial(instance.exports(store)["dynCall_viif"], store)
-dynCall_viiff = partial(instance.exports(store)["dynCall_viiff"], store)
-dynCall_viifff = partial(instance.exports(store)["dynCall_viifff"], store)
-dynCall_viiffffffffi = partial(instance.exports(store)["dynCall_viiffffffffi"], store)
-dynCall_viiffffffffiii = partial(instance.exports(store)["dynCall_viiffffffffiii"], store)
-dynCall_viifffffffi = partial(instance.exports(store)["dynCall_viifffffffi"], store)
-dynCall_viiffffffi = partial(instance.exports(store)["dynCall_viiffffffi"], store)
-dynCall_viifffffi = partial(instance.exports(store)["dynCall_viifffffi"], store)
-dynCall_viiffffi = partial(instance.exports(store)["dynCall_viiffffi"], store)
-dynCall_viifffi = partial(instance.exports(store)["dynCall_viifffi"], store)
-dynCall_viiffi = partial(instance.exports(store)["dynCall_viiffi"], store)
-dynCall_viiffifiii = partial(instance.exports(store)["dynCall_viiffifiii"], store)
-dynCall_viiffii = partial(instance.exports(store)["dynCall_viiffii"], store)
-dynCall_viiffiifi = partial(instance.exports(store)["dynCall_viiffiifi"], store)
-dynCall_viiffiifiii = partial(instance.exports(store)["dynCall_viiffiifiii"], store)
-dynCall_viiffiiii = partial(instance.exports(store)["dynCall_viiffiiii"], store)
-dynCall_viiffiiiii = partial(instance.exports(store)["dynCall_viiffiiiii"], store)
-dynCall_viifi = partial(instance.exports(store)["dynCall_viifi"], store)
-dynCall_viififii = partial(instance.exports(store)["dynCall_viififii"], store)
-dynCall_viififiii = partial(instance.exports(store)["dynCall_viififiii"], store)
-dynCall_viifii = partial(instance.exports(store)["dynCall_viifii"], store)
-dynCall_viifiii = partial(instance.exports(store)["dynCall_viifiii"], store)
-dynCall_viifiiii = partial(instance.exports(store)["dynCall_viifiiii"], store)
-dynCall_viiif = partial(instance.exports(store)["dynCall_viiif"], store)
-dynCall_viiifffi = partial(instance.exports(store)["dynCall_viiifffi"], store)
-dynCall_viiifffiiij = partial(instance.exports(store)["dynCall_viiifffiiij"], store)
-dynCall_viiiffi = partial(instance.exports(store)["dynCall_viiiffi"], store)
-dynCall_viiiffii = partial(instance.exports(store)["dynCall_viiiffii"], store)
-dynCall_viiifi = partial(instance.exports(store)["dynCall_viiifi"], store)
-dynCall_viiififfi = partial(instance.exports(store)["dynCall_viiififfi"], store)
-dynCall_viiififi = partial(instance.exports(store)["dynCall_viiififi"], store)
-dynCall_viiififii = partial(instance.exports(store)["dynCall_viiififii"], store)
-dynCall_viiifii = partial(instance.exports(store)["dynCall_viiifii"], store)
-dynCall_viiifiii = partial(instance.exports(store)["dynCall_viiifiii"], store)
-dynCall_viiifiiiii = partial(instance.exports(store)["dynCall_viiifiiiii"], store)
-dynCall_viiiif = partial(instance.exports(store)["dynCall_viiiif"], store)
-dynCall_viiiiffffffi = partial(instance.exports(store)["dynCall_viiiiffffffi"], store)
-dynCall_viiiifffffi = partial(instance.exports(store)["dynCall_viiiifffffi"], store)
-dynCall_viiiiffffii = partial(instance.exports(store)["dynCall_viiiiffffii"], store)
-dynCall_viiiifffi = partial(instance.exports(store)["dynCall_viiiifffi"], store)
-dynCall_viiiiffiii = partial(instance.exports(store)["dynCall_viiiiffiii"], store)
-dynCall_viiiifi = partial(instance.exports(store)["dynCall_viiiifi"], store)
-dynCall_viiiififfi = partial(instance.exports(store)["dynCall_viiiififfi"], store)
-dynCall_viiiifii = partial(instance.exports(store)["dynCall_viiiifii"], store)
-dynCall_viiiifiifi = partial(instance.exports(store)["dynCall_viiiifiifi"], store)
-dynCall_viiiifiii = partial(instance.exports(store)["dynCall_viiiifiii"], store)
-dynCall_viiiifiiii = partial(instance.exports(store)["dynCall_viiiifiiii"], store)
-dynCall_viiiifiiiii = partial(instance.exports(store)["dynCall_viiiifiiiii"], store)
-dynCall_viiiifiiiiif = partial(instance.exports(store)["dynCall_viiiifiiiiif"], store)
-dynCall_viiiifiiiiiiii = partial(instance.exports(store)["dynCall_viiiifiiiiiiii"], store)
-dynCall_viiiiif = partial(instance.exports(store)["dynCall_viiiiif"], store)
-dynCall_viiiiiffi = partial(instance.exports(store)["dynCall_viiiiiffi"], store)
-dynCall_viiiiiffii = partial(instance.exports(store)["dynCall_viiiiiffii"], store)
-dynCall_viiiiifi = partial(instance.exports(store)["dynCall_viiiiifi"], store)
-dynCall_viiiiifiii = partial(instance.exports(store)["dynCall_viiiiifiii"], store)
-dynCall_viiiiiif = partial(instance.exports(store)["dynCall_viiiiiif"], store)
-dynCall_viiiiiifddfiii = partial(instance.exports(store)["dynCall_viiiiiifddfiii"], store)
-dynCall_viiiiiiffffiii = partial(instance.exports(store)["dynCall_viiiiiiffffiii"], store)
-dynCall_viiiiiifiifiii = partial(instance.exports(store)["dynCall_viiiiiifiifiii"], store)
-dynCall_viiiiiifjjfiii = partial(instance.exports(store)["dynCall_viiiiiifjjfiii"], store)
-dynCall_viiiiiiifddfii = partial(instance.exports(store)["dynCall_viiiiiiifddfii"], store)
-dynCall_viiiiiiiffffii = partial(instance.exports(store)["dynCall_viiiiiiiffffii"], store)
-dynCall_viiiiiiifiifii = partial(instance.exports(store)["dynCall_viiiiiiifiifii"], store)
-dynCall_viiiiiiifjjfii = partial(instance.exports(store)["dynCall_viiiiiiifjjfii"], store)
-dynCall_viiiiiiiiiiifii = partial(instance.exports(store)["dynCall_viiiiiiiiiiifii"], store)
-dynCall_viiiiiji = partial(instance.exports(store)["dynCall_viiiiiji"], store)
-dynCall_viiiij = partial(instance.exports(store)["dynCall_viiiij"], store)
-dynCall_viiiijii = partial(instance.exports(store)["dynCall_viiiijii"], store)
-dynCall_viiiijiiii = partial(instance.exports(store)["dynCall_viiiijiiii"], store)
-dynCall_viiij = partial(instance.exports(store)["dynCall_viiij"], store)
-dynCall_viiiji = partial(instance.exports(store)["dynCall_viiiji"], store)
-dynCall_viiijji = partial(instance.exports(store)["dynCall_viiijji"], store)
-dynCall_viij = partial(instance.exports(store)["dynCall_viij"], store)
-dynCall_viiji = partial(instance.exports(store)["dynCall_viiji"], store)
-dynCall_viijii = partial(instance.exports(store)["dynCall_viijii"], store)
-dynCall_viijiii = partial(instance.exports(store)["dynCall_viijiii"], store)
-dynCall_viijiijiii = partial(instance.exports(store)["dynCall_viijiijiii"], store)
-dynCall_viijijii = partial(instance.exports(store)["dynCall_viijijii"], store)
-dynCall_viijijiii = partial(instance.exports(store)["dynCall_viijijiii"], store)
-dynCall_viijijj = partial(instance.exports(store)["dynCall_viijijj"], store)
-dynCall_viijj = partial(instance.exports(store)["dynCall_viijj"], store)
-dynCall_viijji = partial(instance.exports(store)["dynCall_viijji"], store)
-dynCall_viijjii = partial(instance.exports(store)["dynCall_viijjii"], store)
-dynCall_viijjiii = partial(instance.exports(store)["dynCall_viijjiii"], store)
-dynCall_viijjji = partial(instance.exports(store)["dynCall_viijjji"], store)
-dynCall_vij = partial(instance.exports(store)["dynCall_vij"], store)
-dynCall_viji = partial(instance.exports(store)["dynCall_viji"], store)
-dynCall_vijii = partial(instance.exports(store)["dynCall_vijii"], store)
-dynCall_vijiii = partial(instance.exports(store)["dynCall_vijiii"], store)
-dynCall_vijiiii = partial(instance.exports(store)["dynCall_vijiiii"], store)
-dynCall_vijiji = partial(instance.exports(store)["dynCall_vijiji"], store)
-dynCall_vijijji = partial(instance.exports(store)["dynCall_vijijji"], store)
-dynCall_vijji = partial(instance.exports(store)["dynCall_vijji"], store)
-dynCall_vijjii = partial(instance.exports(store)["dynCall_vijjii"], store)
-dynCall_vijjji = partial(instance.exports(store)["dynCall_vijjji"], store)
-dynCall_vji = partial(instance.exports(store)["dynCall_vji"], store)
-dynCall_vjii = partial(instance.exports(store)["dynCall_vjii"], store)
-dynCall_vjiiii = partial(instance.exports(store)["dynCall_vjiiii"], store)
-dynCall_vjji = partial(instance.exports(store)["dynCall_vjji"], store)
-
-print('debug')
+out = lok.Pointer_stringify(ptr, 2)  # Output : el
+print(out)

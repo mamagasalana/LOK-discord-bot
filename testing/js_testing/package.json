@@ -1,0 +1,10 @@
+{
+    "name": "lok_discord_bot",
+    "version": "1.0.0",
+    "scripts": {
+      "start": "http-server ./"
+    },
+    "dependencies": {
+      "http-server": "^0.12.3"
+    }
+  }

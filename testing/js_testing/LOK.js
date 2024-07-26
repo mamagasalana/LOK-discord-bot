@@ -1041,7 +1041,7 @@ function integrateWasmJS() {
     if (!isDataURI(wasmBinaryFile)) {
         wasmBinaryFile = locateFile(wasmBinaryFile)
     }
-    wasmBinaryFile = 'http://127.0.0.1:8080/file.wasm';
+    wasmBinaryFile = 'http://127.0.0.1:8080/test.wasm';
     if (!isDataURI(asmjsCodeFile)) {
         asmjsCodeFile = locateFile(asmjsCodeFile)
     }

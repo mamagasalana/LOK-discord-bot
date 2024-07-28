@@ -38,7 +38,7 @@ async def run():
                             # TODO: this input configuration could consist the x, y location
                             # sample from the game
                             await ws.send_str('42["/zone/leave/list/v2", {"world":66, "zones":"[0,64,1,65]"}]')
-                            await ws.send_str('42["/zone/enter/list/v4", "VVZDX0cIDEdCAgUcDFQbWlVGRlJHIwcLCBYCRw0FB0hcVUkCHwMWFk0YAwxRW0lMBAIHAh1MDQAZV1FQTBgHAB8WKRYcFwcHCAhgSkBLDE4HTQ=="]')
+                            await ws.send_str('42["/zone/enter/list/v4", "VUpOWAEIAhUIXlFGRFRBBlxEUV5EbAJEUV5KHwJeDGpRSERUXQUXPh9eS0oDBA4="]')
                         elif msg.data.startswith('42'):
                             js = json.loads(msg.data[2:])
                             compressed_data = js[-1]['packs']

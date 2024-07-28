@@ -9,13 +9,14 @@ from websocketmanager import WebSocketClientManager
 
 class LOK_JS2PY(wasm_base):
     def __init__(self):
+        super().__init__()
         if 1:
             self.config = Config()
             self.config.wasm_multi_value = True
             self.engine = Engine()
 
             # Load the Wasm module
-            self.wasm_module = Module.from_file(self.engine, "testing/LOK.wasm")
+            self.wasm_module = Module.from_file(self.engine, "testing/js_testing/test.wasm")
             self.store = Store(self.engine)
             # Create memory
             limits = Limits(512, None)  # Replace None with maximum size if needed
@@ -1253,17 +1254,17 @@ class LOK_JS2PY(wasm_base):
         """
         byte array function
         """
-        buffer = np.zeros(536870912, dtype=np.uint8)
+        self.buffer = np.zeros(536870912, dtype=np.uint8)
 
         # Create views of the buffer with different data types
-        self.HEAP8 = buffer.view(np.int8)
-        self.HEAP16 = buffer.view(np.int16)
-        self.HEAP32 = buffer.view(np.int32)
-        self.HEAPU8 = buffer.view(np.uint8)
-        self.HEAPU16 = buffer.view(np.uint16)
-        self.HEAPU32 = buffer.view(np.uint32)
-        self.HEAPF32 = buffer.view(np.float32)
-        self.HEAPF64 = buffer.view(np.float64)
+        self.HEAP8 = self.buffer.view(np.int8)
+        self.HEAP16 = self.buffer.view(np.int16)
+        self.HEAP32 = self.buffer.view(np.int32)
+        self.HEAPU8 = self.buffer.view(np.uint8)
+        self.HEAPU16 = self.buffer.view(np.uint16)
+        self.HEAPU32 = self.buffer.view(np.uint32)
+        self.HEAPF32 = self.buffer.view(np.float32)
+        self.HEAPF64 = self.buffer.view(np.float64)
 
     @property
     def UTF8Decoder(self):
@@ -1323,3 +1324,31 @@ class LOK_JS2PY(wasm_base):
             return ret
         
         return self.UTF8ToString(ptr)
+
+    def allocateUTF8(self, _in):
+        size = self.lengthBytesUTF8(_in) + 1
+        ret = self._malloc(size)
+        if ret:
+            self.stringToUTF8Array(_in, self.HEAP8, ret, size)
+        return ret
+
+    @staticmethod
+    def alignUp(self, x, multiple):
+        if x % multiple > 0:
+            x += multiple - (x % multiple)
+        return x
+    
+    def reallocBuffer(self, size):
+        PAGE_MULTIPLE = self.WASM_PAGE_SIZE 
+        size = self.alignUp(size, PAGE_MULTIPLE)
+        oldSize = self.buffer.nbytes
+
+        try:
+            additional_pages = (size - oldSize) // self.WASM_PAGE_SIZE
+            new_size = oldSize + additional_pages * self.WASM_PAGE_SIZE
+            new_buffer = np.zeros(new_size, dtype=np.uint8)
+            new_buffer[:oldSize] = self.buffer
+            self.buffer = new_buffer
+        except Exception as e:
+            return None
+            

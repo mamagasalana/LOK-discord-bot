@@ -4,6 +4,8 @@ from urllib.parse import quote
 import sys
 import os
 import ctypes
+import time
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'testing')))
 
 from websocketmanager import customWebSocket
@@ -31,6 +33,8 @@ class wasm_base:
         self.STACK_MAX = 0
         self.DYNAMIC_BASE = 0
         self.DYNAMICTOP_PTR = 0
+
+        self.clock_start = None
 
     def abort(self,param0):
         logging.info("abort not implemented")
@@ -695,6 +699,7 @@ class wasm_base:
             self.ws._callOnOpen(on_open, _id)
 
         def on_message_wrapper(ws1, message):
+            logging.info("_ws_create: on message wrapper: ", message)
             if isinstance(message, (bytes, bytearray)):
                 self.ws._callOnBinary(on_binary, _id, message)
             else:
@@ -1012,8 +1017,10 @@ class wasm_base:
         return 0
 
     def _clock(self):
-        logging.info("_clock not implemented")
-        return 0
+        if self.clock_start is None:
+            self.clock_start = time.time()
+        return int((time.time() - self.clock_start) * 1e6)
+        # return 0
 
     def _clock_getres(self,param0,param1):
         logging.info("_clock_getres not implemented")
@@ -2209,3 +2216,7 @@ class wasm_base:
     def _glClientWaitSync(self,param0,param1,param2,param3):
         logging.info("_glClientWaitSync not implemented")
         return 0
+
+    def log(self, param0):
+        logging.info("from custom log: %s" % param0)
+        return

@@ -8,7 +8,7 @@ from wasm_base import wasm_base
 from websocketmanager import WebSocketClientManager
 
 class LOK_JS2PY(wasm_base):
-    def __init__(self):
+    def __init__(self, wasmfile= "testing/js_testing/test2.wasm"):
         super().__init__()
         if 1:
             self.config = Config()
@@ -16,7 +16,7 @@ class LOK_JS2PY(wasm_base):
             self.engine = Engine()
 
             # Load the Wasm module
-            self.wasm_module = Module.from_file(self.engine, "testing/js_testing/test.wasm")
+            self.wasm_module = Module.from_file(self.engine, wasmfile)
             self.store = Store(self.engine)
             # Create memory
             limits = Limits(512, None)  # Replace None with maximum size if needed
@@ -583,6 +583,7 @@ class LOK_JS2PY(wasm_base):
                 "invoke_vijii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self.invoke_vijii),
                 "_atomic_fetch_add_8": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._atomic_fetch_add_8),
                 "_glClientWaitSync": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._glClientWaitSync),
+                "log": Func(self.store, FuncType([ValType.i32()], []), self.log),
         }}
 
     def export_wasm_func(self):

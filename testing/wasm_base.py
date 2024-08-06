@@ -25,15 +25,15 @@ class wasm_base:
         self.MIN_TOTAL_MEMORY = 16777216;
         self.TOTAL_MEMORY = 33554432;
         
-        self.STATIC_BASE = 0
-        self.STATICTOP = 0
-        self.staticSealed = None
-        self.STACK_BASE = 0
-        self.STACKTOP = 0
-        self.STACK_MAX = 0
-        self.DYNAMIC_BASE = 0
-        self.DYNAMICTOP_PTR = 0
-
+        self.TOTAL_STACK= 5242880;
+        self.STATIC_BASE = 1024
+        self.STATICTOP = 5948976;
+        self.DYNAMICTOP_PTR = self.staticAlloc(4)
+        self.staticSealed = True
+        self.STACKTOP = self.STACK_BASE = self.alignMemory(self.STATICTOP)
+        self.STACK_MAX = self.STACK_BASE + self.TOTAL_STACK
+        self.DYNAMIC_BASE = self.alignMemory(self.STACK_MAX)
+        
         self.clock_start = None
 
     def abort(self,param0):

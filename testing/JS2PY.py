@@ -2,6 +2,7 @@ from wasmtime import Config, Store, Engine, Module, FuncType, Func, ValType, Ins
 from functools import partial
 import numpy as np
 import codecs
+import math
 
 # local modules
 from wasm_base import wasm_base
@@ -32,19 +33,19 @@ class LOK_JS2PY(wasm_base):
             global_type32 = GlobalType(ValType.i32(), mutable)
             global_type64 = GlobalType(ValType.f64(), mutable)
             # Create globals
-            global_tableBase = Global(self.store, global_type32, Val.i32(0))
-            global_DYNAMICTOP_PTR = Global(self.store, global_type32, Val.i32(0))
-            global_STACKTOP = Global(self.store, global_type32, Val.i32(0))
-            global_STACK_MAX = Global(self.store, global_type32, Val.i32(0))
+            self.global_tableBase = Global(self.store, global_type32, Val.i32(0))
+            self.global_DYNAMICTOP_PTR = Global(self.store, global_type32, Val.i32(self.DYNAMICTOP_PTR))
+            self.global_STACKTOP = Global(self.store, global_type32, Val.i32(self.STACKTOP))
+            self.global_STACK_MAX = Global(self.store, global_type32, Val.i32(self.STACK_MAX))
             
             self.init_base_func()
             
             wasm_args = [memory, 
                     table, 
-                    global_tableBase,
-                    global_DYNAMICTOP_PTR,
-                    global_STACKTOP,
-                    global_STACK_MAX,
+                    self.global_tableBase,
+                    self.global_DYNAMICTOP_PTR,
+                    self.global_STACKTOP,
+                    self.global_STACK_MAX,
                     Global(self.store, global_type64, Val.f64(float('nan'))),
                     Global(self.store, global_type64, Val.f64(float('inf'))),
                     Func(self.store, FuncType([ValType.f64(), ValType.f64()], [ValType.f64()]), pow),
@@ -1353,3 +1354,11 @@ class LOK_JS2PY(wasm_base):
         except Exception as e:
             return None
             
+    def alignMemory(self, size, factor=16):
+        ret = size = math.ceil(size / factor) * factor;
+        return ret
+
+    def staticAlloc(self, size):
+        ret = self.STATICTOP
+        self.STATICTOP = self.STATICTOP + size + 15 & -16
+        return ret

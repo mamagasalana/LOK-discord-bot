@@ -13,11 +13,11 @@ try:
 except:
     pass
 
-lok = LOK_JS2PY("testing/js_testing/test2.wasm")
+lok = LOK_JS2PY("testing/js_testing/test3.wasm")
 a = LokService()
 a.login()
 token = a.accessToken
-
+lok.customstore(5271516, 26750912) # this is setup somewhere, manual modify
 URL = f"wss://socf-lok-live.leagueofkingdoms.com/socket.io/?EIO=4&transport=websocket&token={token}"
 lok._WS_Create(URL, '', 17058,17691,14198,17692,14199 )
 print('\ndebug started')
@@ -28,5 +28,4 @@ print('\ndebug started')
 
 # 2024-07-28 21:15:01,881 - INFO - _syscall4 not implemented
 # Fill missing function if any
-
 time.sleep(300)

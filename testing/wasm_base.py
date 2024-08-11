@@ -132,7 +132,12 @@ class wasm_base:
         return 0
 
     def invoke_ii(self,param0,param1):
-        logging.info("invoke_ii not implemented")
+        sp = self.stackSave()
+        try:
+            return self.dynCall_ii(param0, param1)
+        except:
+            logging.error('invoke_ii fail?', exc_info=True)
+            self.stackRestore()
         return 0
 
     def invoke_iifii(self,param0,param1,param2,param3,param4):
@@ -140,7 +145,12 @@ class wasm_base:
         return 0
 
     def invoke_iii(self,param0,param1,param2):
-        logging.info("invoke_iii not implemented")
+        sp = self.stackSave()
+        try:
+            return self.dynCall_ii(param0, param1)
+        except:
+            logging.error('invoke_iii fail?', exc_info=True)
+            self.stackRestore()
         return 0
 
     def invoke_iiifi(self,param0,param1,param2,param3,param4):
@@ -208,7 +218,12 @@ class wasm_base:
         return 
 
     def invoke_vii(self,param0,param1,param2):
-        logging.info("invoke_vii not implemented")
+        sp = self.stackSave()
+        try:
+            self.dynCall_vii(param0, param1, param2)
+        except:
+            logging.error('invoke_vii fail?', exc_info=True)
+            self.stackRestore()
         return 
 
     def invoke_viidi(self,param0,param1,param2,param3,param4):
@@ -236,7 +251,12 @@ class wasm_base:
         return 
 
     def invoke_viii(self,param0,param1,param2,param3):
-        logging.info("invoke_viii not implemented")
+        sp = self.stackSave()
+        try:
+            self.dynCall_viii(param0, param1, param2,param3)
+        except:
+            logging.error('invoke_viii fail?', exc_info=True)
+            self.stackRestore()
         return 
 
     def invoke_viiif(self,param0,param1,param2,param3,param4):
@@ -244,7 +264,12 @@ class wasm_base:
         return 
 
     def invoke_viiii(self,param0,param1,param2,param3,param4):
-        logging.info("invoke_viiii not implemented")
+        sp = self.stackSave()
+        try:
+            self.dynCall_viiii(param0, param1, param2,param3,param4)
+        except:
+            logging.error('invoke_viiii fail?', exc_info=True)
+            self.stackRestore()
         return 
 
     def invoke_viiiii(self,param0,param1,param2,param3,param4,param5):
@@ -699,7 +724,7 @@ class wasm_base:
             self.ws._callOnOpen(on_open, _id)
 
         def on_message_wrapper(ws1, message):
-            logging.info("_ws_create: on message wrapper: ", message)
+            logging.info("_ws_create: on message wrapper: %s" % message)
             if isinstance(message, (bytes, bytearray)):
                 self.ws._callOnBinary(on_binary, _id, message)
             else:

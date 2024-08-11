@@ -588,6 +588,7 @@ class LOK_JS2PY(wasm_base):
         }}
 
     def export_wasm_func(self):
+        self.customstore = partial(self.instance.exports(self.store)["customstore"], self.store)
         self.__growWasmMemory = partial(self.instance.exports(self.store)["__growWasmMemory"], self.store)
         self.stackAlloc = partial(self.instance.exports(self.store)["stackAlloc"], self.store)
         self.stackSave = partial(self.instance.exports(self.store)["stackSave"], self.store)

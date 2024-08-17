@@ -5,10 +5,9 @@ import sys
 import os
 import ctypes
 import time
-
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'testing')))
 
-from websocketmanager import customWebSocket
+from websocketmanager import customWebSocket, JSSYS,ERRNO_CODES
 # from FS import FS
 logging.basicConfig(
     filename="logs/wasm.log",
@@ -35,6 +34,7 @@ class wasm_base:
         self.DYNAMIC_BASE = self.alignMemory(self.STACK_MAX)
         
         self.clock_start = None
+        self.SYSCALLS = JSSYS(self)
 
     def abort(self,param0):
         logging.info("abort not implemented")
@@ -132,6 +132,7 @@ class wasm_base:
         return 0
 
     def invoke_ii(self,param0,param1):
+        logging.info('invoke_ii %s %s' % (param0, param1))
         sp = self.stackSave()
         try:
             return self.dynCall_ii(param0, param1)
@@ -145,9 +146,10 @@ class wasm_base:
         return 0
 
     def invoke_iii(self,param0,param1,param2):
+        logging.info('invoke_iii %s %s %s' % (param0,param1,param2))
         sp = self.stackSave()
         try:
-            return self.dynCall_ii(param0, param1)
+            return self.dynCall_iii(param0, param1,param2)
         except:
             logging.error('invoke_iii fail?', exc_info=True)
             self.stackRestore()
@@ -158,7 +160,13 @@ class wasm_base:
         return 0
 
     def invoke_iiii(self,param0,param1,param2,param3):
-        logging.info("invoke_iiii not implemented")
+        logging.info('invoke_iiii %s %s %s %s' % (param0,param1,param2,param3))
+        sp = self.stackSave()
+        try:
+            return self.dynCall_iiii(param0, param1,param2, param3)
+        except:
+            logging.error('invoke_iiii fail?', exc_info=True)
+            self.stackRestore()
         return 0
 
     def invoke_iiiifii(self,param0,param1,param2,param3,param4,param5,param6):
@@ -218,6 +226,7 @@ class wasm_base:
         return 
 
     def invoke_vii(self,param0,param1,param2):
+        logging.info('invoke_vii %s %s %s' % (param0, param1, param2))
         sp = self.stackSave()
         try:
             self.dynCall_vii(param0, param1, param2)
@@ -251,6 +260,7 @@ class wasm_base:
         return 
 
     def invoke_viii(self,param0,param1,param2,param3):
+        logging.info('invoke_viii %s %s %s %s' % (param0,param1,param2, param3))
         sp = self.stackSave()
         try:
             self.dynCall_viii(param0, param1, param2,param3)
@@ -264,6 +274,7 @@ class wasm_base:
         return 
 
     def invoke_viiii(self,param0,param1,param2,param3,param4):
+        logging.info('invoke_viiii %s %s %s %s %s' % (param0,param1,param2, param3, param4))
         sp = self.stackSave()
         try:
             self.dynCall_viiii(param0, param1, param2,param3,param4)
@@ -923,9 +934,47 @@ class wasm_base:
         logging.info("_syscall183 not implemented")
         return 0
 
-    def _syscall192(self,param0,param1):
-        logging.info("_syscall192 not implemented")
-        return 0
+    def _syscall192(self, which, varargs):
+        logging.info("_syscall192 %s %s " % (which, varargs))
+        self.SYSCALLS.varargs = varargs
+        try:
+            addr = self.SYSCALLS.get()
+            len_ = self.SYSCALLS.get()
+            prot = self.SYSCALLS.get()
+            flags = self.SYSCALLS.get()
+            fd = self.SYSCALLS.get()
+            off = self.SYSCALLS.get()
+            off <<= 12
+            ptr = None
+            allocated = False
+
+            if fd == -1:
+                ptr = self._memalign(self.PAGE_SIZE, len_)
+                if not ptr:
+                    return -ERRNO_CODES.ENOMEM
+                self._memset(ptr, 0, len_)
+                allocated = True
+            # else:
+            #     info = FS.getStream(fd)
+            #     if not info:
+            #         return -ERRNO_CODES.EBADF
+            #     res = FS.mmap(info, HEAPU8, addr, len_, off, prot, flags)
+            #     ptr = res.ptr
+            #     allocated = res.allocated
+
+            self.SYSCALLS.mappings[ptr] = {
+                'malloc': ptr,
+                'len': len_,
+                'allocated': allocated,
+                'fd': fd,
+                'flags': flags
+            }
+            return ptr
+        except Exception as e:
+            # if 'FS' not in globals() or not isinstance(e, FS.ErrnoError):
+            #     self.abort(e)
+            return -e.errno
+
 
     def _syscall193(self,param0,param1):
         logging.info("_syscall193 not implemented")
@@ -1299,8 +1348,8 @@ class wasm_base:
         return 0
 
     def _getpagesize(self):
-        logging.info("_getpagesize not implemented")
-        return 0
+        logging.info("_getpagesize")
+        return self.PAGE_SIZE
 
     def _getpwuid(self,param0):
         logging.info("_getpwuid not implemented")

@@ -971,9 +971,8 @@ class wasm_base:
             }
             return ptr
         except Exception as e:
-            # if 'FS' not in globals() or not isinstance(e, FS.ErrnoError):
-            #     self.abort(e)
-            return -e.errno
+            logging.error("_syscall192" , exc_info=True)
+            return -1
 
 
     def _syscall193(self,param0,param1):
@@ -1074,9 +1073,30 @@ class wasm_base:
         logging.info("_syscall85 not implemented")
         return 0
 
-    def _syscall91(self,param0,param1):
-        logging.info("_syscall91 not implemented")
-        return 0
+    def _syscall91(self,param0,varargs):
+        logging.info("_syscall91 %s %s" % (param0, varargs))
+
+        self.SYSCALLS.varargs = varargs
+        try:
+            addr = self.SYSCALLS.get()
+            length = self.SYSCALLS.get()
+            info = self.SYSCALLS.mappings.get(addr)
+
+            if not info:
+                return 0
+
+            if length == info['len']:
+                stream = self.FS.getStream(info['fd'])
+                self.SYSCALLS.doMsync(addr, stream, length, info['flags'])
+                self.FS.munmap(stream)
+                self.SYSCALLS.mappings[addr] = None
+                if info['allocated']:
+                    self._free(info['malloc'])
+            
+            return 0
+        except Exception as e:
+            logging.error("_syscall91" , exc_info=True)
+            return -1
 
     def _unlock(self,param0):
         logging.info("_unlock not implemented")

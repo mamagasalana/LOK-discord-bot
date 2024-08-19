@@ -99,6 +99,7 @@ class JSSYS:
     def __init__(self, o):
         self.varargs =  0
         self.o = o
+        self.mappings = {}
 
     def getStreamFromFD(self):
         stream = FS.getStream(self.get())
@@ -107,7 +108,7 @@ class JSSYS:
     def get(self):
         self.varargs += 4
         ret = self.o.HEAP32[self.varargs - 4 >> 2]
-        return ret
+        return int(ret)
 
 class ERRNO_CODES:
     EPERM=1

@@ -22,7 +22,7 @@ class LOK_JS2PY(wasm_base):
             # Create memory
             limits = Limits(512, None)  # Replace None with maximum size if needed
             memory_type = MemoryType(limits)
-            memory = Memory(self.store, memory_type)
+            self.memory = Memory(self.store, memory_type)
 
             # Create table
             limits = Limits(181773, 181773)
@@ -40,7 +40,7 @@ class LOK_JS2PY(wasm_base):
             
             self.init_base_func()
             
-            wasm_args = [memory, 
+            wasm_args = [self.memory, 
                     table, 
                     self.global_tableBase,
                     self.global_DYNAMICTOP_PTR,
@@ -54,8 +54,6 @@ class LOK_JS2PY(wasm_base):
             self.instance = Instance(self.store, self.wasm_module, wasm_args)
             self.export_wasm_func()
             self.ws = WebSocketClientManager(self)
-
-        self.init_byte_func()
 
     def init_base_func(self):
         self.import_object = {
@@ -1253,21 +1251,41 @@ class LOK_JS2PY(wasm_base):
         self.dynCall_vjiiii = partial(self.instance.exports(self.store)["dynCall_vjiiii"], self.store)
         self.dynCall_vjji = partial(self.instance.exports(self.store)["dynCall_vjji"], self.store)
 
-    def init_byte_func(self):
-        """
-        byte array function
-        """
-        self.buffer = np.zeros(536870912, dtype=np.uint8)
+    @property
+    def buffer(self):
+        return np.array(self.memory.get_buffer_ptr(self.store))
+    
+    @property
+    def HEAP8(self):
+        return self.buffer.view(np.int8)
+    
+    @property
+    def HEAP16(self):
+        return self.buffer.view(np.int16)
+    
+    @property
+    def HEAP32(self):
+        return self.buffer.view(np.int32)
 
-        # Create views of the buffer with different data types
-        self.HEAP8 = self.buffer.view(np.int8)
-        self.HEAP16 = self.buffer.view(np.int16)
-        self.HEAP32 = self.buffer.view(np.int32)
-        self.HEAPU8 = self.buffer.view(np.uint8)
-        self.HEAPU16 = self.buffer.view(np.uint16)
-        self.HEAPU32 = self.buffer.view(np.uint32)
-        self.HEAPF32 = self.buffer.view(np.float32)
-        self.HEAPF64 = self.buffer.view(np.float64)
+    @property
+    def HEAPU8(self):
+        return self.buffer.view(np.uint8)
+    
+    @property
+    def HEAPU16(self):
+        return self.buffer.view(np.uint16)
+
+    @property
+    def HEAPU32(self):
+        return self.buffer.view(np.uint32)
+
+    @property
+    def HEAPF32(self):
+        return self.buffer.view(np.float32)
+    
+    @property
+    def HEAPF64(self):
+        return self.buffer.view(np.float64)
 
     @property
     def UTF8Decoder(self):
@@ -1508,7 +1526,6 @@ class LOK_JS2PY(wasm_base):
         self.__GLOBAL__sub_I_Runtime_Serialize_TransferFunctions_0_cpp()
         self.__GLOBAL__sub_I_Runtime_Serialize_TransferFunctions_1_cpp()
         self.__GLOBAL__sub_I_PlatformDependent_WebGL_Source_0_cpp()
-        print('debug')
         self.__GLOBAL__sub_I_PlatformDependent_WebGL_Source_2_cpp()
         self.__GLOBAL__sub_I_LogAssert_cpp()
         self.__GLOBAL__sub_I_Shader_cpp()

@@ -1,5 +1,6 @@
 import websocket
 import os
+import numpy as np
 
 class customWebSocket(websocket.WebSocketApp):
     def __init__(self, *args, **kwargs):
@@ -54,7 +55,26 @@ class WebSocketClientManager:
         self.o.stringToUTF8Array(reason, self.o.HEAPU8, buffer, length)
         self.o.dynCall_vii(errCallback, id, buffer)
 
+class HEAPView:
+    def __init__(self, main_obj):
+        self.main_obj = main_obj
+        self.current_view = None
 
+    def __getitem__(self, key):
+        if self.current_view is None:
+            raise ValueError("View is not set. Use view to set a view type.")
+        return self.main_obj.buffer.view(self.current_view)[key]
+    
+    def __setitem__(self, key, value):
+        if self.current_view is None:
+            raise ValueError("View is not set. Use view to set a view type.")
+        itemsize = np.dtype(self.current_view).itemsize 
+        self.main_obj.customstore(key * itemsize, value)
+
+    def view(self, view):
+        self.current_view = view
+        return self
+    
 Module = {
     "preloadPlugins": [],
     "logReadFiles": False,

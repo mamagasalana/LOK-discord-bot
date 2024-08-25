@@ -1,11 +1,21 @@
 ################################################################################
 # Example usage
 
+
+
 import os
 try:
     os.remove("logs/wasm.log")
 except Exception as e:
     print(e)
+
+import logging
+# from FS import FS
+logging.basicConfig(
+    filename="logs/wasm.log",
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
 
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
@@ -14,7 +24,9 @@ import time
 from services.lok_service import LokService
 from JS2PY import LOK_JS2PY
 
-lok = LOK_JS2PY("testing/js_testing/test3.wasm")
+lok = LOK_JS2PY("testing/js_testing/test4.wasm")
+lok.customstore(5948976, 11191872)
+lok.customstore(5948960, 5524807)
 lok._AT_INIT()
 a = LokService()
 a.login()
@@ -32,6 +44,16 @@ print('\ndebug started')
 #  def _WS_Create
 # >> on_message_wrapper
 
+#track this const 5913980
+#track this const 5913984
+#track this const 5913988
+# culprit found 5914000
+
+
+# 2024-08-25 00:30:48,424 - INFO - from funcname 93115, placeholder 3 : 4096
+# 2024-08-25 00:30:48,425 - INFO - from funcname 93115, placeholder 4 : 1114112
+# expect 11191872 for from funcname 93115, placeholder 3
+# expect 0 for from funcname 93115, placeholder 4
 
 # 2024-07-28 21:15:01,881 - INFO - _syscall4 not implemented
 # Fill missing function if any

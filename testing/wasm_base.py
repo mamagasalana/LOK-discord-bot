@@ -8,12 +8,6 @@ import time
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'testing')))
 
 from websocketmanager import customWebSocket, JSSYS,ERRNO_CODES
-# from FS import FS
-logging.basicConfig(
-    filename="logs/wasm.log",
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-)
 
 class wasm_base:
     def __init__(self):
@@ -35,6 +29,9 @@ class wasm_base:
         
         self.clock_start = None
         self.SYSCALLS = JSSYS(self)
+        self.init_time = time.time()*1000 #start time
+        self.___buildEnvironment = False
+        self.runtimeInitialized = True
 
     def abort(self,param0):
         logging.info("abort not implemented")
@@ -284,9 +281,15 @@ class wasm_base:
         return 
 
     def invoke_viiiii(self,param0,param1,param2,param3,param4,param5):
-        logging.info("invoke_viiiii not implemented")
+        logging.info('invoke_viiiii %s %s %s %s %s %s' % (param0,param1,param2, param3, param4, param5))
+        sp = self.stackSave()
+        try:
+            self.dynCall_viiiii(param0, param1, param2,param3,param4, param5)
+        except:
+            logging.error('invoke_viiii fail?', exc_info=True)
+            self.stackRestore()
         return 
-
+    
     def invoke_viiiiii(self,param0,param1,param2,param3,param4,param5,param6):
         logging.info("invoke_viiiiii not implemented")
         return 
@@ -732,6 +735,7 @@ class wasm_base:
         _id = self.ws.nextInstanceId
 
         def on_open_wrapper(ws1):
+            logging.info("_ws_open")
             self.ws._callOnOpen(on_open, _id)
 
         def on_message_wrapper(ws1, message):
@@ -835,7 +839,49 @@ class wasm_base:
         return 
 
     def _buildEnvironment(self,param0):
-        logging.info("_buildEnvironment not implemented")
+        logging.info("_buildEnvironment")
+        MAX_ENV_VALUES = 64
+        TOTAL_ENV_SIZE = 1024
+        poolPtr = None
+        envPtr = None        
+        if not self.___buildEnvironment:
+            self.___buildEnvironment = True
+            self.ENV["LOGNAME"] = "web_user"
+            self.ENV["USER"] = "web_user" 
+            self.ENV["PATH"] = "/"
+            self.ENV["PWD"] = "/"
+            self.ENV["HOME"] = "/home/web_user"
+            self.ENV["LANG"] = "C.UTF-8"
+            self.ENV["_"] = "./this.program"
+
+            poolPtr = self.getMemory(TOTAL_ENV_SIZE)
+            envPtr = self.getMemory(MAX_ENV_VALUES * 4)
+            # self.customstore((envPtr >> 2)*4, poolPtr)
+            # self.customstore((param0 >> 2)*4, envPtr)
+            self.HEAP32[envPtr >> 2] = poolPtr
+            self.HEAP32[param0 >> 2] = envPtr
+        else:
+            envPtr = self.HEAP32[param0 >> 2]
+            poolPtr = self.HEAP32[envPtr >> 2]
+
+        strings = []
+        totalSize = 0
+        for key, value in self.ENV.items():
+            if isinstance(value, str):
+                line = f"{key}={value}"
+                strings.append(line)
+                totalSize += len(line)
+
+        if totalSize > TOTAL_ENV_SIZE:
+            raise ValueError("Environment size exceeded TOTAL_ENV_SIZE!")
+
+        ptrSize = 4
+        for i, line in enumerate(strings):
+            self.writeAsciiToMemory(line, poolPtr)
+            self.HEAP32[(envPtr + i * ptrSize) >> 2] = poolPtr
+            poolPtr += len(line) + 1
+
+        self.HEAP32[(envPtr + len(strings) * ptrSize) >> 2] = 0
         return 
 
     def _cxa_allocate_exception(self,param0):
@@ -1177,8 +1223,8 @@ class wasm_base:
         return 
 
     def _emscripten_get_now(self):
-        logging.info("_emscripten_get_now not implemented")
-        return 0
+        logging.info("_emscripten_get_now")
+        return time.time()*1000 - self.init_time
 
     def _emscripten_get_num_gamepads(self):
         logging.info("_emscripten_get_num_gamepads not implemented")
@@ -2246,9 +2292,15 @@ class wasm_base:
     def invoke_jiiji(self,param0,param1,param2,param3,param4,param5):
         logging.info("invoke_jiiji not implemented")
         return 0
-
+        
     def invoke_jiji(self,param0,param1,param2,param3,param4):
-        logging.info("invoke_jiji not implemented")
+        logging.info('invoke_jiji %s %s %s' % (param0,param1,param2,param3,param4))
+        sp = self.stackSave()
+        try:
+            return self.dynCall_jiji(param0, param1,param2,param3,param4)
+        except:
+            logging.error('invoke_jiji fail?', exc_info=True)
+            self.stackRestore()
         return 0
 
     def invoke_jijii(self,param0,param1,param2,param3,param4,param5):
@@ -2313,4 +2365,8 @@ class wasm_base:
 
     def log(self, param0):
         logging.info("from custom log: %s" % param0)
+        return
+
+    def log2(self, funcname, placeholder, logval):
+        logging.info(f"from funcname {funcname}, placeholder {placeholder} : {logval}")
         return

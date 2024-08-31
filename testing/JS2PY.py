@@ -1306,7 +1306,10 @@ class LOK_JS2PY(wasm_base):
         bytes_to_copy = min(len(utf8_bytes), maxBytesToWrite - 1)  # Leave space for the null terminator
 
         # Copy the bytes to the output array
-        outU8Array[outIdx:outIdx + bytes_to_copy] = np.frombuffer(utf8_bytes[:bytes_to_copy], dtype=np.uint8)
+        to_be_input= np.frombuffer(utf8_bytes[:bytes_to_copy], dtype=np.uint8) 
+        for idx, inp in enumerate(to_be_input, start=outIdx):
+            outU8Array[idx] = int(inp)
+        # outU8Array[outIdx:outIdx + bytes_to_copy] = np.frombuffer(utf8_bytes[:bytes_to_copy], dtype=np.uint8)
         outU8Array[outIdx + bytes_to_copy] = 0  # Null terminator
 
         return bytes_to_copy
@@ -1357,6 +1360,12 @@ class LOK_JS2PY(wasm_base):
             self.stringToUTF8Array(_in, self.HEAP8, ret, size)
         return ret
 
+    def allocateUTF8OnStack(self, _in):
+        size = self.lengthBytesUTF8(_in) +1
+        ret = self.stackAlloc(size)
+        self.stringToUTF8Array(_in, self.HEAP8, ret, size)
+        return ret
+    
     @staticmethod
     def alignUp(self, x, multiple):
         if x % multiple > 0:
@@ -1850,3 +1859,15 @@ class LOK_JS2PY(wasm_base):
         logging.info("AT_INIT >> ___emscripten_environ_constructor")
         self.___emscripten_environ_constructor()
         logging.info("AT_INIT >> DONE!")
+
+    def _AT_MAIN(self):
+        try:
+            argc = 1
+            argv = self.stackAlloc( (argc+1)*4)
+            self.HEAP32[argv >> 2] = self.allocateUTF8OnStack('./this.program')
+            self.HEAP32[(argv >> 2) + argc] = 0
+            logging.info("AT_MAIN >> _main")
+            tmp = self._main(argc, argv)
+        except Exception as e:
+            logging.error( "_AT_MAIN failed" , exc_info=True)
+            raise e

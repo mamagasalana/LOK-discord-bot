@@ -1,6 +1,7 @@
 import websocket
 import os
 import numpy as np
+from pathlib import Path
 
 class customWebSocket(websocket.WebSocketApp):
     def __init__(self, *args, **kwargs):
@@ -70,7 +71,11 @@ class HEAPView:
             raise ValueError("View is not set. Use view to set a view type.")
         itemsize = np.dtype(self.current_view).itemsize 
         self.main_obj.customstore(key * itemsize, value)
-
+    
+    @property
+    def v(self):
+        return self.main_obj.buffer.view(self.current_view)
+    
     def view(self, view):
         self.current_view = view
         return self
@@ -108,13 +113,6 @@ def time():
     import time
     return int(time.time())
 
-class FS:
-    def __init__(self):
-        self.streams = []
-
-    def getStream(self, fd):
-        return self.streams[fd]
-
 class JSSYS:
     def __init__(self, o):
         self.varargs =  0
@@ -122,7 +120,7 @@ class JSSYS:
         self.mappings = {}
 
     def getStreamFromFD(self):
-        stream = FS.getStream(self.get())
+        stream = self.o.streams[self.get()]
         return stream
 
     def get(self):
@@ -130,6 +128,37 @@ class JSSYS:
         ret = self.o.HEAP32[self.varargs - 4 >> 2]
         return int(ret)
 
+    def getStr(self):
+        ret = self.o.Pointer_stringify(self.get())
+        return ret
+    
+    def doReadv(self, stream, iov, iovcnt):
+        ret = 0
+        position = 0
+        stream.seek(0)
+        contents = stream.read()
+        contents_np = np.frombuffer(contents, dtype=np.uint8)
+
+        for i in range(iovcnt):
+            ptr = self.o.HEAP32[(iov + i * 8) >> 2]
+            length = self.o.HEAP32[(iov + (i * 8 + 4)) >> 2]
+            if position >= len(contents):
+                continue
+            curr = min(length, len(contents) - position)
+            contents_np_subarray = contents_np[position : position + curr]
+            for idx, inp in enumerate(contents_np_subarray, start=ptr):
+                self.o.HEAP8[idx] = int(inp)            
+
+            position += curr
+            if curr < 0:
+                return -1
+            
+            ret += curr
+            
+            if curr < length:
+                break
+
+        return ret
 class ERRNO_CODES:
     EPERM=1
     ENOENT=2

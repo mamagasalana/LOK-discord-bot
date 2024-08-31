@@ -28,6 +28,7 @@ lok = LOK_JS2PY("testing/js_testing/test4.wasm")
 lok.customstore(5948976, 11191872)
 lok.customstore(5948960, 5524807)
 lok._AT_INIT()
+lok._AT_MAIN()
 a = LokService()
 a.login()
 token = a.accessToken

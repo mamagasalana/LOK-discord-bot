@@ -13,10 +13,21 @@
             "envFile": "${workspaceFolder}/.env"
         },
         {
-            "name": "test",
+            "name": "sample_ws_create",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/testing/sample_ws_create.py",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "envFile": "${workspaceFolder}/.env",
+            "justMyCode": false
+            
+        },
+        {
+            "name": "test",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "envFile": "${workspaceFolder}/.env",

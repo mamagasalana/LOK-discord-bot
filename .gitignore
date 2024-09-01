@@ -8,3 +8,5 @@ __pycache__/
 *.wat
 teezai*
 *.backup
+testing/js_testing/JS_MOUNT/*
+*.ipynb

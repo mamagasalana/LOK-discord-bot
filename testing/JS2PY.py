@@ -7,7 +7,7 @@ import logging
 
 # local modules
 from wasm_base import wasm_base
-from websocketmanager import WebSocketClientManager, HEAPView
+from websocketmanager import WebSocketClientManager
 
 class LOK_JS2PY(wasm_base):
     def __init__(self, wasmfile= "testing/js_testing/test2.wasm"):
@@ -56,7 +56,6 @@ class LOK_JS2PY(wasm_base):
             self.export_wasm_func()
             self.ws = WebSocketClientManager(self)
 
-        self.HEAPView = HEAPView(self)
 
     def init_base_func(self):
         self.import_object = {
@@ -590,7 +589,6 @@ class LOK_JS2PY(wasm_base):
         }}
 
     def export_wasm_func(self):
-        self.customstore = partial(self.instance.exports(self.store)["customstore"], self.store)
         self.__growWasmMemory = partial(self.instance.exports(self.store)["__growWasmMemory"], self.store)
         self.stackAlloc = partial(self.instance.exports(self.store)["stackAlloc"], self.store)
         self.stackSave = partial(self.instance.exports(self.store)["stackSave"], self.store)
@@ -1255,41 +1253,40 @@ class LOK_JS2PY(wasm_base):
         self.dynCall_vjiiii = partial(self.instance.exports(self.store)["dynCall_vjiiii"], self.store)
         self.dynCall_vjji = partial(self.instance.exports(self.store)["dynCall_vjji"], self.store)
 
-    @property
-    def buffer(self):
-        return np.array(self.memory.get_buffer_ptr(self.store))
+    def buffer(self, dtype):
+        return np.frombuffer(self.memory.get_buffer_ptr(self.store), dtype=dtype)
     
     @property
     def HEAP8(self):
-        return self.HEAPView.view(np.int8)
+        return self.buffer(np.int8)
     
     @property
     def HEAP16(self):
-        return self.HEAPView.view(np.int16)
+        return self.buffer(np.int16)
     
     @property
     def HEAP32(self):
-        return self.HEAPView.view(np.int32)
+        return self.buffer(np.int32)
 
     @property
     def HEAPU8(self):
-        return self.HEAPView.view(np.uint8)
+        return self.buffer(np.uint8)
     
     @property
     def HEAPU16(self):
-        return self.HEAPView.view(np.uint16)
+        return self.buffer(np.uint16)
 
     @property
     def HEAPU32(self):
-        return self.HEAPView.view(np.uint32)
+        return self.buffer(np.uint32)
 
     @property
     def HEAPF32(self):
-        return self.HEAPView.view(np.float32)
+        return self.buffer(np.float32)
     
     @property
     def HEAPF64(self):
-        return self.HEAPView.view(np.float64)
+        return self.buffer(np.float64)
 
     @property
     def UTF8Decoder(self):
@@ -1365,8 +1362,7 @@ class LOK_JS2PY(wasm_base):
         ret = self.stackAlloc(size)
         self.stringToUTF8Array(_in, self.HEAP8, ret, size)
         return ret
-    
-    @staticmethod
+
     def alignUp(self, x, multiple):
         if x % multiple > 0:
             x += multiple - (x % multiple)

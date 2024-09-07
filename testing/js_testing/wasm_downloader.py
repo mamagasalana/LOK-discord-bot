@@ -42,7 +42,8 @@ class lok_files_downloader:
 if 1:
     lok = lok_files_downloader(True)
     # wasm file
-    lok.download('https://play.leagueofkingdoms.com/Build/625145317.webgl.wasm.code.unityweb', os.path.join(*['testing',  'js_testing','test.wasm'])) 
+    if 0:
+        lok.download('https://play.leagueofkingdoms.com/Build/625145317.webgl.wasm.code.unityweb', os.path.join(*['testing',  'js_testing','test.wasm'])) 
     # this is data file
     lok.download('https://play.leagueofkingdoms.com/Build/625145317.webgl.data.unityweb', os.path.join(*['testing',  'js_testing','test']))  
     # this is the js file

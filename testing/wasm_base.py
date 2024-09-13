@@ -8,34 +8,52 @@ import time
 import io
 from functools import wraps
 import re
+import numpy as np
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'testing')))
 
-from websocketmanager import customWebSocket, JSSYS,ERRNO_CODES
+from websocketmanager import customWebSocket, JSSYS,ERRNO_CODES, FS
 
-HEAP32_DEBUG= [5914000, 5913988, 5913980, 5913984, 5914448, 5914456] 
-HEAP32_DEBUG_FULL = HEAP32_DEBUG + [ 5202024, 5949232, 5084484, 5913996]
+# HEAP32_DEBUG= [5914000, 5913988, 5913980, 5913984, 5914448, 5914456] 
+# HEAP32_DEBUG_FULL = HEAP32_DEBUG + [5914000,  5202024, 5949232, 5084484, 5913996, 5949244, 5271560, 5271564, 5271108, 18729848, 18730008]
+HEAP32_DEBUG=  [5914040, 5949364, 5914048,5913976, 5913992, 5913996, 5914000]
+HEAP32_DEBUG_FULL = [5914040, 5949364,  5914048,5913976, 5913992, 5913996, 5914000]
+
+def log_wasm(k,v):
+    logging.info(f"from funcname {k}, {dict(sorted(v.items()))}")
+
 def logwrap(func):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        log_msg = f"'{func.__name__}' {args}"
+        args_flatten_txt = '()'
+        if args:
+            args_flatten = [f'(index == {args[0]})'] + [f'(a{idx} == {arg})' for idx, arg in enumerate(args[1:], start=1)]
+            args_flatten_txt = ' && '.join(args_flatten)
+        log_msg = f"'{func.__name__}' {args_flatten_txt}"
         
-        
-        out = {x: self.HEAP32[x//4] for x in range(min(HEAP32_DEBUG), max(HEAP32_DEBUG)+4, 4)}
-        log_msg += f" ||| {out}"
-        if self.func_stack:
-            for k, v in self.func_stack.items():
-                logging.info(f"from funcname {k}, {dict(sorted(v.items()))}")
-            
-            self.func_stack = {}
+        if HEAP32_DEBUG:
+            out = {x: self.HEAP32[x//4] for x in HEAP32_DEBUG_FULL}
+            # out.update({x: self.HEAP32[x//4] for x in range(min(HEAP32_DEBUG), max(HEAP32_DEBUG)+4, 4)})
+            log_msg += f" ||| {out}"
+            if self.func_stack:
+                for k, v in self.func_stack.items():
+                    log_wasm(k ,v)
+                
+                self.func_stack = {}
         logging.info(log_msg)
-        return func(self, *args, **kwargs)
+        try:
+            ret =  func(self, *args, **kwargs)
+        except Exception as e:
+            logging.error(f"'{func.__name__}' failed", exc_info=True)
+            raise e
+        return ret
     
     return wrapper
 
 class wasm_base:
     def __init__(self):
         self.ENV = {}
+        self.GETENV_RET = {}
         self.PAGE_SIZE = 16384;
         self.WASM_PAGE_SIZE = 65536;
         self.ASMJS_PAGE_SIZE = 16777216;
@@ -57,8 +75,6 @@ class wasm_base:
         self.___buildEnvironment = False
         self.runtimeInitialized = True
         self.streams = {}
-        self.streams_name = {}
-        self.PATHMAP = lambda x : os.path.join(*['testing' , 'js_testing', 'JS_MOUNT', x])
 
         self.JSEVENTS = {}
         with open('testing/funcidx.txt', 'r') as ofile:
@@ -102,8 +118,13 @@ class wasm_base:
         return 0
     
     @logwrap
-    def invoke_dddi(self,param0,param1,param2,param3):
-        logging.error("invoke_dddi not implemented")
+    def invoke_dddi(self,*args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_dddi(*args)
+        except:
+            logging.error('invoke_i fail?', exc_info=True)
+            self.stackRestore()
         return 0
     
     @logwrap
@@ -233,13 +254,24 @@ class wasm_base:
     
     @logwrap
     def invoke_iiiii(self,param0,param1,param2,param3,param4):
-        logging.error("invoke_iiiii not implemented")
+        sp = self.stackSave()
+        try:
+            return self.dynCall_iiiii(param0,param1,param2,param3,param4)
+        except:
+            logging.error('invoke_iiiii fail?', exc_info=True)
+            self.stackRestore()
         return 0
     
     @logwrap
     def invoke_iiiiii(self,param0,param1,param2,param3,param4,param5):
-        logging.error("invoke_iiiiii not implemented")
+        sp = self.stackSave()
+        try:
+            return self.dynCall_iiiiii(param0,param1,param2,param3,param4,param5)
+        except:
+            logging.error('invoke_iiiiii fail?', exc_info=True)
+            self.stackRestore()
         return 0
+    
     
     @logwrap
     def invoke_iiiiiii(self,param0,param1,param2,param3,param4,param5,param6):
@@ -319,6 +351,7 @@ class wasm_base:
     @logwrap
     def invoke_vii(self,param0,param1,param2):
         sp = self.stackSave()
+
         try:
             self.dynCall_vii(param0, param1, param2)
         except:
@@ -387,13 +420,18 @@ class wasm_base:
         try:
             self.dynCall_viiiii(param0, param1, param2,param3,param4, param5)
         except:
-            logging.error('invoke_viiii fail?', exc_info=True)
+            logging.error('invoke_viiiii fail?', exc_info=True)
             self.stackRestore()
         return 
     
     @logwrap    
     def invoke_viiiiii(self,param0,param1,param2,param3,param4,param5,param6):
-        logging.error("invoke_viiiiii not implemented")
+        sp = self.stackSave()
+        try:
+            self.dynCall_viiiiii(param0,param1,param2,param3,param4,param5,param6)
+        except:
+            logging.error('invoke_viiiiii fail?', exc_info=True)
+            self.stackRestore()
         return 
     
     @logwrap
@@ -638,8 +676,10 @@ class wasm_base:
     
     @logwrap
     def _JS_SystemInfo_GetDocumentURL(self,param0,param1):
-        logging.error("_JS_SystemInfo_GetDocumentURL not implemented")
-        return 0
+        url ='https://play.leagueofkingdoms.com/'
+        if param0:
+            self.stringToUTF8(url, param0, param1)
+        return self.lengthBytesUTF8(url)
     
     @logwrap
     def _JS_SystemInfo_GetGPUInfo(self,param0,param1):
@@ -1300,9 +1340,35 @@ class wasm_base:
         return 0
     
     @logwrap
-    def _syscall195(self,param0,param1):
-        logging.error("_syscall195 not implemented")
-        return 0
+    def _syscall195(self,param0,varargs):
+        self.SYSCALLS.varargs = varargs
+        try:
+            stream = self.SYSCALLS.getStr()
+            buf = self.SYSCALLS.get()
+            stat = os.stat(stream)
+            self.HEAP32[buf >> 2] = stat.st_dev
+            self.HEAP32[buf + 4 >> 2] = 0
+            self.HEAP32[buf + 8 >> 2] = hash(stat.st_ino) & 0xFFFFFFFF
+            self.HEAP32[buf + 12 >> 2] = stat.st_mode
+            self.HEAP32[buf + 16 >> 2] = stat.st_nlink
+            self.HEAP32[buf + 20 >> 2] = stat.st_uid
+            self.HEAP32[buf + 24 >> 2] = stat.st_gid
+            self.HEAP32[buf + 28 >> 2] = 0  #stat.rdev
+            self.HEAP32[buf + 32 >> 2] = 0
+            self.HEAP32[buf + 36 >> 2] = stat.st_size   
+            self.HEAP32[buf + 40 >> 2] = 4096
+            self.HEAP32[buf + 44 >> 2] = stat.st_size //4096 +1
+            self.HEAP32[buf + 48 >> 2] = int(stat.st_atime)
+            self.HEAP32[buf + 52 >> 2] = 0
+            self.HEAP32[buf + 56 >> 2] = int(stat.st_mtime)
+            self.HEAP32[buf + 60 >> 2] = 0
+            self.HEAP32[buf + 64 >> 2] = int(stat.st_ctime)
+            self.HEAP32[buf + 68 >> 2] = 0
+            self.HEAP32[buf + 72 >> 2] = hash(stat.st_ino) & 0xFFFFFFFF
+            return 0
+        except Exception as e:
+            logging.error("_syscall195 failed" , exc_info=True)
+            return -1
     
     @logwrap
     def _syscall196(self,param0,param1):
@@ -1367,16 +1433,25 @@ class wasm_base:
             stream = self.SYSCALLS.getStreamFromFD()
             buf = self.SYSCALLS.get()
             count = self.SYSCALLS.get()
-            ret = 0
+            ret = stream.read_to_buffer(self.HEAP8, buf, count)
             return ret
         except Exception as e:
             logging.error("_syscall3 failed" , exc_info=True)
             return -1
     
     @logwrap
-    def _syscall33(self,param0,param1):
-        logging.error("_syscall33 not implemented")
-        return 0
+    def _syscall33(self,param0,varargs):
+        logging.warning("_syscall33 -- ignored")
+        self.SYSCALLS.varargs = varargs
+        try:
+            path = self.SYSCALLS.getStr()
+            amode = self.SYSCALLS.get()
+            ret = 0
+            # ret  = self.SYSCALLS.doAccess(path, amode)
+            return ret
+        except Exception as e:
+            logging.error("_syscall33 failed" , exc_info=True)
+            return -1
     
     @logwrap
     def _syscall38(self,param0,param1):
@@ -1410,10 +1485,8 @@ class wasm_base:
             pathname = self.SYSCALLS.getStr()
             flags = self.SYSCALLS.get()
             mode = self.SYSCALLS.get()
-            actual_path = self.PATHMAP(pathname)
-            fd= os.open(actual_path, flags=flags, mode=mode)
-            self.streams[fd] =  io.FileIO(fd)
-            self.streams_name[fd] = actual_path
+            fd= os.open(pathname, flags=flags, mode=mode)
+            self.streams[fd] =  FS(fd, pathname)
             return fd
         except Exception as e:
             logging.error("_syscall5" , exc_info=True)
@@ -1433,7 +1506,6 @@ class wasm_base:
             fd = stream.fileno()
             stream.close()
             self.streams.pop(fd)
-            self.streams_name.pop(fd)
             return 0    
         except Exception as e:
             logging.error("_syscall6" , exc_info=True)
@@ -1800,8 +1872,12 @@ class wasm_base:
         if name not in self.ENV:
             return 0
         
-        value = self.ENV[name]
-        return self.allocateUTF8(value)
+        if name in self.GETENV_RET:
+            ret = self.GETENV_RET.pop(name)
+            self._free(ret)
+        ret =  self.allocateUTF8(self.ENV[name])
+        self.GETENV_RET[name] = ret
+        return ret
     
     
     @logwrap
@@ -2781,10 +2857,25 @@ class wasm_base:
         return 0
     
     @logwrap
-    def _setenv(self,param0,param1,param2):
-        logging.error("_setenv not implemented")
+    def _setenv(self,envname, envval, overwrite):
+        if (envname == 0) :
+            raise ERRNO_CODES.EINVAL
+        
+        name = self.Pointer_stringify(envname)
+        val = self.Pointer_stringify(envval)
+
+        if not name or '=' in name:
+            raise ERRNO_CODES.EINVAL
+        
+        if name in self.ENV and not overwrite:
+            return 0
+        
+        self.ENV[name] = val
+        tmp = self._get_environ()
+        self._buildEnvironment(tmp)
         return 0
-    
+
+
     @logwrap
     def _sigaction(self,param0,param1,param2):
         logging.error("_sigaction not implemented")
@@ -3001,9 +3092,13 @@ class wasm_base:
         return 
     
     @logwrap
-    def _atomic_fetch_add_8(self,param0,param1,param2,param3):
-        logging.error("_atomic_fetch_add_8 not implemented")
-        return 0
+    def _atomic_fetch_add_8(self,ptr, vall, valh, memmodel):
+        lo = int( self.HEAP32[ptr >> 2])
+        hi = int(self.HEAP32[ptr + 4 >> 2])
+        self.HEAP32[ptr >> 2] = self._i64Add(lo, hi, vall, valh)
+        self.HEAP32[ptr + 4 >> 2] = self.getTempRet0()
+        self.setTempRet0(hi)
+        return lo
     
     @logwrap
     def _glClientWaitSync(self,param0,param1,param2,param3):
@@ -3011,22 +3106,24 @@ class wasm_base:
         return 0
 
     def log(self, param0):
+        return
         out = {}
         for idx in HEAP32_DEBUG_FULL:
             out[idx] =  self.HEAP32[idx//4]
-        logging.debug(f"from custom log: {param0} ||| {dict(sorted(out.items()))}"  )
+        logging.info(f"from custom log: {param0} ||| {dict(sorted(out.items()))}"  )
         return
 
     def log2(self, funcname, placeholder, logval):
+        return
         if self.func_stack and funcname not in self.func_stack:
             for k, v in self.func_stack.items():
-                logging.info(f"from funcname {k}, {dict(sorted(v.items()))}")
+                log_wasm(k ,v)
             self.func_stack = {}
             return self.log2(funcname, placeholder, logval)
         
         if funcname in self.func_stack:
             if placeholder in self.func_stack[funcname] and placeholder not in HEAP32_DEBUG_FULL:
-                logging.info(f"from funcname {funcname}, {dict(sorted(self.func_stack[funcname].items()))}")
+                log_wasm(funcname ,self.func_stack[funcname])
                 self.func_stack.pop(funcname)
                 return self.log2(funcname, placeholder, logval)
             else:

@@ -83,7 +83,7 @@ def process_data(content):
         o += l
         
         print(fpath, s, d, l)
-        fpath = os.path.join(*['testing',  'js_testing', 'JS_MOUNT', fpath])
+        fpath = os.path.join(*['testing',  'js_testing', 'JS_MOUNT2', fpath])
         folder = os.path.dirname(fpath)
         os.makedirs(folder, exist_ok=True)
         with open(fpath,'wb') as ofile:

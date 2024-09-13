@@ -831,7 +831,7 @@ class LOK_JS2PY(wasm_base):
         self.__get_tzname = partial(self.instance.exports(self.store)["__get_tzname"], self.store)
         self.__get_daylight = partial(self.instance.exports(self.store)["__get_daylight"], self.store)
         self.__get_timezone = partial(self.instance.exports(self.store)["__get_timezone"], self.store)
-        self.__get_environ = partial(self.instance.exports(self.store)["__get_environ"], self.store)
+        self._get_environ = partial(self.instance.exports(self.store)["__get_environ"], self.store)
         self.___cxa_can_catch = partial(self.instance.exports(self.store)["___cxa_can_catch"], self.store)
         self.___cxa_is_pointer_type = partial(self.instance.exports(self.store)["___cxa_is_pointer_type"], self.store)
         self._i64Add = partial(self.instance.exports(self.store)["_i64Add"], self.store)
@@ -1295,6 +1295,9 @@ class LOK_JS2PY(wasm_base):
     def lengthBytesUTF8(self, s):
         return len(s.encode('utf-8')) 
 
+    def stringToUTF8(self, s, outPtr, maxBytesToWrite):
+        return self.stringToUTF8Array(s, self.HEAPU8, outPtr, maxBytesToWrite)
+    
     def stringToUTF8Array(self, s, outU8Array, outIdx, maxBytesToWrite):
         if not (maxBytesToWrite > 0):
             return 0

@@ -9,4 +9,5 @@ __pycache__/
 teezai*
 *.backup
 testing/js_testing/JS_MOUNT/*
+testing/js_testing/JS_MOUNT2/*
 *.ipynb

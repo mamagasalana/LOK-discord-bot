@@ -2,6 +2,7 @@ import websocket
 import os
 import numpy as np
 from pathlib import Path
+import io
 
 class customWebSocket(websocket.WebSocketApp):
     def __init__(self, *args, **kwargs):
@@ -70,32 +71,25 @@ MEMFS = {
 }
 IDBFS = NODEFS = WORKERFS = MEMFS
 
-def UTF8ArrayToString(array, idx):
-    return ''.join(chr(b) for b in array[idx:] if b != 0)
+class FS(io.FileIO):
+    def __init__(self, fd, path):
+        super().__init__(fd)
+        self.path = path
 
-def stringToUTF8Array(string, array, idx, maxBytesToWrite):
-    for i, char in enumerate(string[:maxBytesToWrite - 1]):
-        array[idx + i] = ord(char)
-    array[idx + len(string[:maxBytesToWrite - 1])] = 0
-    return len(string[:maxBytesToWrite - 1]) + 1
-
-def intArrayFromString(string, nullTerminated=False):
-    result = [ord(c) for c in string]
-    if nullTerminated:
-        result.append(0)
-    return result
-
-def time():
-    import time
-    return int(time.time())
-
+    def read_to_buffer(self, buffer, offset, length):
+        contents = self.read(length)
+        contents_np = np.frombuffer(contents, dtype=np.uint8)
+        size = len(contents)
+        buffer[offset:offset + size] = contents_np
+        return size
+        
 class JSSYS:
     def __init__(self, o):
         self.varargs =  0
         self.o = o
         self.mappings = {}
 
-    def getStreamFromFD(self):
+    def getStreamFromFD(self) -> FS:
         stream = self.o.streams[self.get()]
         return stream
 
@@ -106,29 +100,18 @@ class JSSYS:
 
     def getStr(self):
         ret = self.o.Pointer_stringify(self.get())
-        return ret
-    
-    def read(self, stream, buffer, offset, length):
-        pass
-        
-    def doReadv(self, stream, iov, iovcnt):
+        fx = lambda x : os.path.join(*['testing' , 'js_testing', 'JS_MOUNT', x])
+        if ret.startswith('/'):
+            ret = ret[1:]
+        return fx(ret)
+          
+    def doReadv(self, stream: FS, iov, iovcnt):
         ret = 0
-        position = 0
-        stream.seek(0)
-        contents = stream.read()
-        contents_np = np.frombuffer(contents, dtype=np.uint8)
 
         for i in range(iovcnt):
             ptr = self.o.HEAP32[(iov + i * 8) >> 2]
             length = self.o.HEAP32[(iov + (i * 8 + 4)) >> 2]
-            if position >= len(contents):
-                continue
-            curr = min(length, len(contents) - position)
-            contents_np_subarray = contents_np[position : position + curr]
-            for idx, inp in enumerate(contents_np_subarray, start=ptr):
-                self.o.HEAP8[idx] = int(inp)            
-
-            position += curr
+            curr = stream.read_to_buffer(self.o.HEAP8, ptr, length)
             if curr < 0:
                 return -1
             

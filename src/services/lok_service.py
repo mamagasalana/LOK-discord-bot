@@ -37,16 +37,19 @@ class LokService:
             logging.error("Token not found in the response: %s", response.json())
             raise ValueError("Token not found")
 
-    # get personal email list
-    def get_personal_email_list(self):
-        headers = {
+    @property
+    def headers(self):
+        return {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
             "Content-Type": "application/x-www-form-urlencoded",
             "X-Access-Token": self.accessToken,
         }
+    
+    # get personal email list
+    def get_personal_email_list(self):
         payload = '{"category":0}'
         encoded_payload = "json=" + urllib.parse.quote(payload)
-        response = self.session.post(MAIL_URL, headers=headers, data=encoded_payload)
+        response = self.session.post(MAIL_URL, headers=self.headers, data=encoded_payload)
         response.raise_for_status()
 
         mails = response.json().get("mails", [])
@@ -71,6 +74,28 @@ class LokService:
 
         return filtered_mails
 
+    def get_kingdomid_by_xy(self):
+        pass
+
+    def get_title(self):
+        url = 'https://api-lok-live.leagueofkingdoms.com/api/shrine/title'
+        payload = '{}'
+        encoded_payload = "json=" + urllib.parse.quote(payload)
+        response = self.session.post(url, headers=self.headers, data=encoded_payload)
+        response.raise_for_status()
+
+        self.titles = response.json().get("titles")
+    
+    def change_title(self, code, x, y):
+        if not self.titles:
+            self.get_title()
+        kingdomid= self.get_kingdomid_by_xy(x, y)
+        url = 'https://api-lok-live.leagueofkingdoms.com/api/shrine/title/change'
+        payload = '{"code":%s,"targetKingdomId":"%s"}' % (code, kingdomid)
+        encoded_payload = "json=" + urllib.parse.quote(payload)
+        response = self.session.post(url, headers=self.headers, data=encoded_payload)
+        response.raise_for_status()
+        
     async def get_verification_code_from_mail(self):
         """Fetch user IDs from the external service."""
         if not self.accessToken:

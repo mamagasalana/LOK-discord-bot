@@ -77,6 +77,8 @@ class wasm_base:
         self.streams = {}
 
         self.JSEVENTS = {}
+        self.PTHREAD_SPECIFIC = {}
+        self.PTHREAD_SPECIFIC_NEXT_KEY = 1
         with open('testing/funcidx.txt', 'r') as ofile:
             row = ofile.read()
         self.func_tables = re.findall(r'\d+', row[row.find('func'):])
@@ -555,9 +557,18 @@ class wasm_base:
         return 
     
     @logwrap
-    def _JS_Log_Dump(self,param0,param1):
-        logging.error("_JS_Log_Dump not implemented")
-        return 
+    def _JS_Log_Dump(self,ptr,param1):
+        strr = self.Pointer_stringify(ptr);
+        if param1 in [0, 1, 4]:
+            logging.error(strr)
+        elif param1 == 2:
+            logging.warning(strr)
+        elif param1 in [3, 5]:
+            logging.info(strr)
+        else:
+            logging.error("Unknown console message param1!")
+            logging.error(strr)
+        return
     
     @logwrap
     def _JS_Log_StackTrace(self,param0,param1):
@@ -702,8 +713,7 @@ class wasm_base:
     
     @logwrap
     def _JS_SystemInfo_GetPreferredDevicePixelRatio(self):
-        logging.error("_JS_SystemInfo_GetPreferredDevicePixelRatio not implemented")
-        return 0
+        return 1.0
     
     @logwrap
     def _JS_SystemInfo_GetScreenSize(self,param0,param1):
@@ -1441,14 +1451,16 @@ class wasm_base:
     
     @logwrap
     def _syscall33(self,param0,varargs):
-        logging.warning("_syscall33 -- ignored")
+
         self.SYSCALLS.varargs = varargs
         try:
             path = self.SYSCALLS.getStr()
+            logging.info(path)
             amode = self.SYSCALLS.get()
-            ret = 0
-            # ret  = self.SYSCALLS.doAccess(path, amode)
-            return ret
+            if os.path.exists(path):
+                return 0
+            else:
+                return -2
         except Exception as e:
             logging.error("_syscall33 failed" , exc_info=True)
             return -1
@@ -1459,9 +1471,16 @@ class wasm_base:
         return 0
     
     @logwrap
-    def _syscall39(self,param0,param1):
-        logging.error("_syscall39 not implemented")
-        return 0
+    def _syscall39(self,param0,varargs):
+        self.SYSCALLS.varargs = varargs
+        try:
+            path = self.SYSCALLS.getStr()
+            amode = self.SYSCALLS.get()
+            os.makedirs(path)
+            return 0
+        except Exception as e:
+            logging.error("_syscall33 failed" , exc_info=True)
+            return -1
     
     @logwrap
     def _syscall4(self, notinuse, varargs):
@@ -1703,7 +1722,7 @@ class wasm_base:
     
     @logwrap
     def _emscripten_set_blur_callback_on_thread(self,param0,param1,param2,param3,param4):
-        logging.error("_emscripten_set_blur_callback_on_thread not implemented")
+        logging.warning("_emscripten_set_blur_callback_on_thread not implemented -- ignore")
         return 0
     
     @logwrap
@@ -1731,12 +1750,14 @@ class wasm_base:
     
     @logwrap
     def _emscripten_set_focus_callback_on_thread(self,param0,param1,param2,param3,param4):
-        logging.error("_emscripten_set_focus_callback_on_thread not implemented")
+        if not 'focusEvent' in self.JSEVENTS:
+            self.JSEVENTS['focusEvent'] = self._malloc(256)
         return 0
     
     @logwrap
     def _emscripten_set_fullscreenchange_callback_on_thread(self,param0,param1,param2,param3,param4):
-        logging.error("_emscripten_set_fullscreenchange_callback_on_thread not implemented")
+        if not 'fullscreenChangeEvent' in self.JSEVENTS:
+            self.JSEVENTS['fullscreenChangeEvent'] = self._malloc(280)
         return 0
     
     @logwrap
@@ -2778,22 +2799,18 @@ class wasm_base:
     
     @logwrap
     def _pthread_cond_destroy(self,param0):
-        logging.error("_pthread_cond_destroy not implemented")
         return 0
     
     @logwrap
     def _pthread_cond_init(self,param0,param1):
-        logging.error("_pthread_cond_init not implemented")
         return 0
     
     @logwrap
     def _pthread_cond_timedwait(self,param0,param1,param2):
-        logging.error("_pthread_cond_timedwait not implemented")
         return 0
     
     @logwrap
     def _pthread_cond_wait(self,param0,param1):
-        logging.error("_pthread_cond_wait not implemented")
         return 0
     
     @logwrap
@@ -2802,8 +2819,10 @@ class wasm_base:
         return 0
     
     @logwrap
-    def _pthread_key_create(self,param0,param1):
-        logging.error("_pthread_key_create not implemented")
+    def _pthread_key_create(self,key,destructor):
+        self.HEAP32[key >> 2] = self.PTHREAD_SPECIFIC_NEXT_KEY
+        self.PTHREAD_SPECIFIC[self.PTHREAD_SPECIFIC_NEXT_KEY] = 0
+        self.PTHREAD_SPECIFIC_NEXT_KEY+=1
         return 0
     
     @logwrap
@@ -2818,27 +2837,22 @@ class wasm_base:
     
     @logwrap
     def _pthread_mutex_init(self,param0,param1):
-        logging.error("_pthread_mutex_init not implemented")
         return 0
     
     @logwrap
     def _pthread_mutexattr_destroy(self,param0):
-        logging.error("_pthread_mutexattr_destroy not implemented")
         return 0
     
     @logwrap
     def _pthread_mutexattr_init(self,param0):
-        logging.error("_pthread_mutexattr_init not implemented")
         return 0
     
     @logwrap
     def _pthread_mutexattr_setprotocol(self,param0,param1):
-        logging.error("_pthread_mutexattr_setprotocol not implemented")
         return 0
     
     @logwrap
     def _pthread_mutexattr_settype(self,param0,param1):
-        logging.error("_pthread_mutexattr_settype not implemented")
         return 0
     
     @logwrap
@@ -2897,9 +2911,11 @@ class wasm_base:
         return 0
     
     @logwrap
-    def _time(self,param0):
-        logging.error("_time not implemented")
-        return 0
+    def _time(self,ptr):
+        ret = int(time.time())
+        if ptr:
+            self.HEAP32[ptr >> 2] = ret
+        return ret
     
     @logwrap
     def _unsetenv(self,param0):

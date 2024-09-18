@@ -3,6 +3,7 @@ import os
 import numpy as np
 from pathlib import Path
 import io
+import logging
 
 class customWebSocket(websocket.WebSocketApp):
     def __init__(self, *args, **kwargs):
@@ -91,15 +92,18 @@ class JSSYS:
 
     def getStreamFromFD(self) -> FS:
         stream = self.o.streams[self.get()]
+        # logging.info('JSSYS %s ' % stream)
         return stream
 
     def get(self):
         self.varargs += 4
         ret = self.o.HEAP32[self.varargs - 4 >> 2]
+        # logging.info('JSSYS %s ' % ret)
         return int(ret)
 
     def getStr(self):
         ret = self.o.Pointer_stringify(self.get())
+        # logging.info('JSSYS %s ' % ret)
         fx = lambda x : os.path.join(*['testing' , 'js_testing', 'JS_MOUNT', x])
         if ret.startswith('/'):
             ret = ret[1:]

@@ -1,19 +1,24 @@
+
+if __name__ == "__main__":
+    import os
+    import sys
+    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import asyncio
 from datetime import time
 import discord
+from discord import app_commands
 import logging
 from discord.ext import commands, tasks
 from discord_bot.commands import VerifyButton
 from services.lok_service import LokService
 from discord.ui import View
-from config.config import TOKEN, CHANNEL_ID, CODE_EXPIRY_TIME
+from config.config import TOKEN, CHANNEL_ID, GUILD_ID, CODE_EXPIRY_TIME
 
 
 class LOKBOT:
     def __init__(self):
-        self.lokService = (
-            LokService()
-        )  # Initialize the LokService instance to handle external API interactions
+        self.lokService = LokService()# Initialize the LokService instance to handle external API interactions
         self.verify_button = None  # Button for user verification
         self.check_verification_mail_worker = None  # Task for periodic checking
 
@@ -22,25 +27,49 @@ class LOKBOT:
         intents = discord.Intents.default()
         intents.message_content = True
         intents.guilds = True
-        bot = commands.Bot(
-            command_prefix="!", intents=intents
-        )  # Initialize the bot with the specified command prefix and intents
+        bot = commands.Bot(command_prefix="/", intents=intents)  # Initialize the bot with the specified command prefix and intents
+        guild = discord.Object(id=GUILD_ID)
+        bot.tree.clear_commands(guild=None)
+        bot.tree.clear_commands(guild=guild)
+        ALLOWED_TITLES = ['Alchemist', 'Architect']
+
+        async def autocomplete_requested_title(interaction: discord.Interaction, current: str):
+            # Suggest options that match what the user is typing
+            return [
+                app_commands.Choice(name=title, value=title)
+                for title in ALLOWED_TITLES if current.lower() in title.lower()
+            ]
+
+        # Define the slash command with two inputs and autocomplete for the second input
+        @bot.tree.command(name="title", description="Set a title", guild=guild)
+        @app_commands.describe( requested_title="Choose a title", your_kingdom_id="Your kingdom ID",)
+        @app_commands.autocomplete(requested_title=autocomplete_requested_title)
+        async def title(interaction: discord.Interaction, requested_title: str, your_kingdom_id: str):
+            username = self.lokService.set_title(your_kingdom_id, requested_title)
+            if username is None:
+                await interaction.response.send_message(f"Kingdom ID: {your_kingdom_id} not found")
+            else:
+                await interaction.response.send_message(f"Title: {requested_title} assigned to {username}")
 
         @bot.event
         async def on_ready():
-            # https://discord.com/channels/{server id}/{channel id}
+            # https://discord.com/channels/{guild id}/{channel id}
+            await bot.tree.sync()
+            await bot.tree.sync(guild=guild)
+
             try:
                 channel = await bot.fetch_channel(channel_id)
                 if channel:
                     await channel.send("Bot has joined the channel!")
-                    self.verify_button = VerifyButton()
-                    view = View()
-                    view.add_item(self.verify_button)
-                    await channel.send(
-                        "Click the verify_button to get your verification code:",
-                        view=view,
-                    )
-                    self.verify_button.start_verification_task(bot.loop)
+                    
+                    # self.verify_button = VerifyButton()
+                    # view = View()
+                    # view.add_item(self.verify_button)
+                    # await channel.send(
+                    #     "Click the verify_button to get your verification code:",
+                    #     view=view,
+                    # )
+                    # self.verify_button.start_verification_task(bot.loop)
                 else:
                     logging.error(
                         f"Channel with ID {channel_id} not found.", exc_info=True

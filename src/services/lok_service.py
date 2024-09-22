@@ -16,7 +16,8 @@ class LokService:
         self.codes2LOK = {}  # this maps confirmation code to LOK user
         self.user_game_info_repo = UserGameInfoRepository(DYNAMO_DB_NAME)
         self.user_personal_info_repo = UserPersonalInfoRepository(DYNAMO_DB_NAME)
-
+        self.login()
+        
     # login api to get access token
     def login(self):
         payload = (
@@ -84,13 +85,13 @@ class LokService:
         response = self.session.post(url, headers=self.headers, data=encoded_payload)
         response.raise_for_status()
 
-        self.titles = response.json().get("titles")
+        return response.json().get("titles")
     
-    def change_title(self, code, x, y):
-        if not self.titles:
-            self.get_title()
-        kingdomid= self.get_kingdomid_by_xy(x, y)
+    def set_title(self, kingdomid, title):
+        TITLES = self.get_title()
+        # kingdomid= self.get_kingdomid_by_xy(x, y)
         url = 'https://api-lok-live.leagueofkingdoms.com/api/shrine/title/change'
+        code =1
         payload = '{"code":%s,"targetKingdomId":"%s"}' % (code, kingdomid)
         encoded_payload = "json=" + urllib.parse.quote(payload)
         response = self.session.post(url, headers=self.headers, data=encoded_payload)

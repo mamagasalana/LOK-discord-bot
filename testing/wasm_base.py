@@ -9,10 +9,11 @@ import io
 from functools import wraps
 import re
 import numpy as np
+import math
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'testing')))
 
-from websocketmanager import customWebSocket, JSSYS,ERRNO_CODES, FS
+from websocketmanager import customWebSocket, JSSYS,ERRNO_CODES, FS, ASM_CONSTS, UTF8ArrayToString
 
 # HEAP32_DEBUG= [5914000, 5913988, 5913980, 5913984, 5914448, 5914456] 
 # HEAP32_DEBUG_FULL = HEAP32_DEBUG + [5914000,  5202024, 5949232, 5084484, 5913996, 5949244, 5271560, 5271564, 5271108, 18729848, 18730008]
@@ -74,7 +75,11 @@ class wasm_base:
         self.init_time = time.time()*1000 #start time
         self.___buildEnvironment = False
         self.runtimeInitialized = True
-        self.streams = {}
+        self.streams = {
+            sys.stdin.fileno() : FS(sys.stdin.fileno(), 'dev/tty', tty=True),
+            sys.stdout.fileno() : FS(sys.stdout.fileno(), 'dev/tty', tty=True),
+            sys.stderr.fileno() : FS(sys.stderr.fileno(), 'dev/tty1', tty=True)
+        }
 
         self.JSEVENTS = {}
         self.PTHREAD_SPECIFIC = {}
@@ -83,6 +88,33 @@ class wasm_base:
             row = ofile.read()
         self.func_tables = re.findall(r'\d+', row[row.find('func'):])
         self.func_stack = {}
+
+
+        self.GLctx_VERSION= 7938
+        self.GLctx_SHADING_LANGUAGE_VERSION = 35724
+        self.GLctx_getSupportedExtensions= ['EXT_clip_control', 'EXT_color_buffer_float', 'EXT_color_buffer_half_float', 'EXT_conservative_depth', 'EXT_depth_clamp', 'EXT_disjoint_timer_query_webgl2', 'EXT_float_blend', 'EXT_polygon_offset_clamp', 'EXT_render_snorm', 'EXT_texture_compression_bptc', 'EXT_texture_compression_rgtc', 'EXT_texture_filter_anisotropic', 'EXT_texture_mirror_clamp_to_edge', 'EXT_texture_norm16', 'KHR_parallel_shader_compile', 'NV_shader_noperspective_interpolation', 'OES_draw_buffers_indexed', 'OES_sample_variables', 'OES_shader_multisample_interpolation', 'OES_texture_float_linear', 'OVR_multiview2', 'WEBGL_blend_func_extended', 'WEBGL_clip_cull_distance', 'WEBGL_compressed_texture_s3tc', 'WEBGL_compressed_texture_s3tc_srgb', 'WEBGL_debug_renderer_info', 'WEBGL_debug_shaders', 'WEBGL_lose_context', 'WEBGL_multi_draw', 'WEBGL_polygon_mode', 'WEBGL_provoking_vertex', 'WEBGL_stencil_texturing']
+        self.GLctx_getParameter = {
+            7936 : 'WebKit',
+            7937 : 'WebKit WebGL',
+            7938 : 'WebGL 2.0 (OpenGL ES 3.0 Chromium)',
+            35724 : 'WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)',
+            34467: np.array([33776, 33777, 33778, 33779, 35916, 35917, 35918, 35919], dtype=np.uint32),
+            34016 : 33984,
+        }
+
+        self.GL_lasterror = None
+        self.GL_stringCache = {}
+        self.GL_contexts = []
+        self.GL_currentContext = None
+        self.GL_contexts_ext  = {
+            'WEBGL_compressed_texture_s3tc_srgb' : 'WebGLCompressedTextureS3TCsRGB',
+            'EXT_color_buffer_float' : 'EXTColorBufferFloat',
+            }
+
+        self.ALLOC_NORMAL = 0
+        self.ALLOC_STACK = 1
+        self.ALLOC_STATIC = 2
+        self.ALLOC_NONE = 4
 
     @logwrap
     def abort(self,param0):
@@ -737,8 +769,7 @@ class wasm_base:
     
     @logwrap
     def _JS_SystemInfo_HasWebGL(self):
-        logging.error("_JS_SystemInfo_HasWebGL not implemented")
-        return 0
+        return 2
     
     @logwrap
     def _JS_SystemInfo_IsMobile(self):
@@ -1278,10 +1309,18 @@ class wasm_base:
         
     
     @logwrap
-    def _syscall146(self,param0,param1):
-        logging.error("_syscall146 not implemented")
-        return 0
-    
+    def _syscall146(self,param0,varargs):
+        self.SYSCALLS.varargs = varargs
+        try:
+            stream = self.SYSCALLS.getStreamFromFD()
+            iov = self.SYSCALLS.get()
+            iovcnt = self.SYSCALLS.get()
+            ret =  self.SYSCALLS.doWritev(stream, iov, iovcnt)
+            return int(ret)
+        except Exception as e:
+            logging.error("_syscall146" , exc_info=True)
+            return -1
+
     @logwrap
     def _syscall15(self,param0,param1):
         logging.error("_syscall15 not implemented")
@@ -1504,6 +1543,8 @@ class wasm_base:
             pathname = self.SYSCALLS.getStr()
             flags = self.SYSCALLS.get()
             mode = self.SYSCALLS.get()
+            if not os.path.exists(pathname) and mode ==0:
+                return -2
             fd= os.open(pathname, flags=flags, mode=mode)
             self.streams[fd] =  FS(fd, pathname)
             return fd
@@ -1513,9 +1554,40 @@ class wasm_base:
 
     
     @logwrap
-    def _syscall54(self,param0,param1):
-        logging.error("_syscall54 not implemented")
-        return 0
+    def _syscall54(self,param0,varargs):
+        self.SYSCALLS.varargs = varargs
+
+        try:
+            stream = self.SYSCALLS.getStreamFromFD()
+            op = self.SYSCALLS.get()
+
+            if op in [21509, 21505, 21510, 21511, 21512, 21506, 21507, 21508, 21523, 21524]:
+                if not stream.tty:
+                    return -ERRNO_CODES.ENOTTY
+                return 0
+
+            elif op == 21519:
+                if not stream.tty:
+                    return -ERRNO_CODES.ENOTTY
+                argp = self.SYSCALLS.get()
+                self.HEAP32[argp >> 2] = 0
+                return 0
+
+            elif op == 21520:
+                if not stream.tty:
+                    return -ERRNO_CODES.ENOTTY  
+                return -ERRNO_CODES.EINVAL
+
+            elif op == 21531:
+                argp = self.SYSCALLS.get()
+                return FS.ioctl(stream, op, argp)
+
+            else:
+                raise ValueError("bad ioctl syscall " + str(op))
+
+        except Exception as e:
+            logging.error("_syscall54" , exc_info=True)
+            return -1
     
     @logwrap
     def _syscall6(self,param0,varargs):
@@ -1623,13 +1695,13 @@ class wasm_base:
     
     @logwrap
     def _emscripten_asm_const_i(self,param0):
-        logging.error("_emscripten_asm_const_i not implemented")
-        return 0
+        ret = ASM_CONSTS[param0]()
+        return ret
     
     @logwrap
     def _emscripten_asm_const_sync_on_main_thread_i(self,param0):
-        logging.error("_emscripten_asm_const_sync_on_main_thread_i not implemented")
-        return 0
+        ret = ASM_CONSTS[param0]()  
+        return ret
     
     @logwrap
     def _emscripten_cancel_main_loop(self):
@@ -1701,10 +1773,10 @@ class wasm_base:
         return 
     
     @logwrap
-    def _emscripten_memcpy_big(self,param0,param1,param2):
-        logging.error("_emscripten_memcpy_big not implemented")
-        return 0
-    
+    def _emscripten_memcpy_big(self,dest, src, num):
+        self.HEAPU8[dest:dest+num] = self.HEAPU8[src:src+num]
+        return dest
+        
     @logwrap
     def _emscripten_num_logical_cores(self):
         logging.error("_emscripten_num_logical_cores not implemented")
@@ -1841,34 +1913,82 @@ class wasm_base:
         return 0
     
     @logwrap
-    def _emscripten_webgl_create_context(self,param0,param1):
-        logging.error("_emscripten_webgl_create_context not implemented")
-        return 0
-    
+    def _emscripten_webgl_create_context(self,target,attributes):
+        contextAttributes = {}
+        contextAttributes["alpha"] = bool(self.HEAP32[attributes >> 2])
+        contextAttributes["depth"] = bool(self.HEAP32[attributes + 4 >> 2])
+        contextAttributes["stencil"] = bool(self.HEAP32[attributes + 8 >> 2])
+        contextAttributes["antialias"] = bool(self.HEAP32[attributes + 12 >> 2])
+        contextAttributes["premultipliedAlpha"] = bool(self.HEAP32[attributes + 16 >> 2])
+        contextAttributes["preserveDrawingBuffer"] = bool(self.HEAP32[attributes + 20 >> 2])
+        contextAttributes["preferLowPowerToHighPerformance"] = bool(self.HEAP32[attributes + 24 >> 2])
+        contextAttributes["failIfMajorPerformanceCaveat"] = bool(self.HEAP32[attributes + 28 >> 2])
+        contextAttributes["majorVersion"] = self.HEAP32[attributes + 32 >> 2]
+        contextAttributes["minorVersion"] = self.HEAP32[attributes + 36 >> 2]
+        contextAttributes["explicitSwapControl"] = self.HEAP32[attributes + 44 >> 2]
+        contextAttributes["proxyContextToMainThread"] = self.HEAP32[attributes + 48 >> 2]
+        contextAttributes["renderViaOffscreenBackBuffer"] = self.HEAP32[attributes + 52 >> 2]
+        target = self.Pointer_stringify(target)
+
+        handle = self._malloc(8)
+
+        context = {
+            'handle': handle,
+            'attributes': contextAttributes,
+            'version': contextAttributes["majorVersion"],
+            'ctx' : 'Not implemented'
+        }
+        self.HEAP32[handle >> 2] = contextAttributes["explicitSwapControl"]
+        self.GL_contexts = [None] * handle + [context]
+        return handle
+
     @logwrap
     def _emscripten_webgl_destroy_context(self,param0):
         logging.error("_emscripten_webgl_destroy_context not implemented")
         return 0
     
     @logwrap
-    def _emscripten_webgl_enable_extension(self,param0,param1):
-        logging.error("_emscripten_webgl_enable_extension not implemented")
-        return 0
+    def _emscripten_webgl_enable_extension(self,contextHandle, extension):
+        context  = self.GL_contexts[contextHandle]
+        extString = self.Pointer_stringify(extension)
+        if extString.startswith("GL_"):
+            extString = extString[3:]
+        ext = self.GL_contexts_ext.get(extString, False)
+        ret = 1 if ext else 0
+        return ret
     
     @logwrap
     def _emscripten_webgl_get_current_context(self):
-        logging.error("_emscripten_webgl_get_current_context not implemented")
-        return 0
+        if self.GL_currentContext: 
+            return self.GL_currentContext['handle']
+        else:
+            return 0
     
     @logwrap
-    def _emscripten_webgl_init_context_attributes(self,param0):
-        logging.error("_emscripten_webgl_init_context_attributes not implemented")
+    def _emscripten_webgl_init_context_attributes(self,attributes):
+        self.HEAP32[attributes >> 2] = 1
+        self.HEAP32[attributes + 4 >> 2] = 1
+        self.HEAP32[attributes + 8 >> 2] = 0
+        self.HEAP32[attributes + 12 >> 2] = 1
+        self.HEAP32[attributes + 16 >> 2] = 1
+        self.HEAP32[attributes + 20 >> 2] = 0
+        self.HEAP32[attributes + 24 >> 2] = 0
+        self.HEAP32[attributes + 28 >> 2] = 0
+        self.HEAP32[attributes + 32 >> 2] = 1
+        self.HEAP32[attributes + 36 >> 2] = 0
+        self.HEAP32[attributes + 40 >> 2] = 1
+        self.HEAP32[attributes + 44 >> 2] = 0
+        self.HEAP32[attributes + 48 >> 2] = 0
+        self.HEAP32[attributes + 52 >> 2] = 0
         return 
     
     @logwrap
-    def _emscripten_webgl_make_context_current(self,param0):
-        logging.error("_emscripten_webgl_make_context_current not implemented")
-        return 0
+    def _emscripten_webgl_make_context_current(self,contextHandle):
+        try:
+            self.GL_currentContext = self.GL_contexts[contextHandle]
+            return 0
+        except:
+            return -5 
     
     @logwrap
     def _exit(self,param0):
@@ -2383,9 +2503,8 @@ class wasm_base:
         return 
     
     @logwrap
-    def _glGetIntegerv(self,param0,param1):
-        logging.error("_glGetIntegerv not implemented")
-        return 
+    def _glGetIntegerv(self,name_, p):
+        self.emscriptenWebGLGet(name_, p, "Integer")
     
     @logwrap
     def _glGetInternalformativ(self,param0,param1,param2,param3,param4):
@@ -2433,9 +2552,48 @@ class wasm_base:
         return 
     
     @logwrap
-    def _glGetString(self,param0):
-        logging.error("_glGetString not implemented")
-        return 0
+    def _glGetString(self,name_):
+        if name_ in self.GL_stringCache:
+            return self.GL_stringCache[name_]
+        
+        if name_ in [7936, 7937, 37445, 37446]:
+            arr = self.intArrayFromString(self.GLctx_getParameter.get(name_))
+            ret = self.allocate(arr, "i8", self.ALLOC_NORMAL)
+
+        elif name_ == 7938:
+            # Get OpenGL version
+            glVersion = self.GLctx_getParameter.get(self.GLctx_VERSION)
+            glVersion = "OpenGL ES 3.0 (" + glVersion + ")"
+            ret = self.allocate(self.intArrayFromString(glVersion), "i8", self.ALLOC_NORMAL)
+
+        elif name_ == 7939:
+            # Get supported extensions
+            exts = self.GLctx_getSupportedExtensions
+            gl_exts = []
+            for ext in exts:
+                gl_exts.append(ext)
+                gl_exts.append("GL_" + ext)
+            arr = self.intArrayFromString(" ".join(gl_exts))
+            ret = self.allocate(arr, "i8", self.ALLOC_NORMAL)
+
+        elif name_ == 35724:
+            # Get GLSL version
+            glslVersion = self.GLctx_getParameter.get(self.GLctx_SHADING_LANGUAGE_VERSION)
+            ver_re = r"^WebGL GLSL ES ([0-9]\.[0-9][0-9]?)(?:$| .*)"
+            ver_num = re.match(ver_re, glslVersion)
+            if ver_num:
+                ver_num = ver_num.group(1)
+                if len(ver_num) == 3:
+                    ver_num = ver_num + "0"
+                glslVersion = "OpenGL ES GLSL ES " + ver_num + " (" + glslVersion + ")"
+            arr = self.intArrayFromString(glslVersion)
+            ret = self.allocate(arr, "i8", "ALLOC_NORMAL")
+
+        else:
+            self.GL_lasterror = 1280
+            return 0
+        self.GL_stringCache[name_] = ret
+        return ret
     
     @logwrap
     def _glGetStringi(self,param0,param1):
@@ -3121,6 +3279,72 @@ class wasm_base:
         logging.error("_glClientWaitSync not implemented")
         return 0
 
+
+    def emscriptenWebGLGet(self, name_, p, type):
+        if not p:
+            self.GL_lasterror = 1281
+            return
+
+        ret = None
+        if name_ == 36346:
+            ret = 1
+        elif name_ == 36344:
+            if type not in ["Integer", "Integer64"]:
+                self.GL_lasterror = 1280
+                return
+        elif name_ in [34814, 36345]:
+            ret = 0
+        elif name_ == 34466:
+            formats = self.GLctx_getParameter.get(34467)
+            ret = len(formats)
+        elif name_ == 33309:
+            exts = self.GLctx_getSupportedExtensions
+            ret = 2 * len(exts)
+        elif name_ in [33307, 33308]:
+            ret = 3 if name_ == 33307 else 0
+
+        if ret is None:
+            result = self.GLctx_getParameter.get(name_)
+            if isinstance(result, (int, float, bool)):
+                ret = int(result) if isinstance(result, bool) else result
+            elif result is None:
+                if name_ in [34964, 35725, 34965, 36006, 36007, 32873, 34229, 35097, 36389, 34068]:
+                    ret = 0
+                else:
+                    self.GL_lasterror = 1280
+                    return
+            elif isinstance(result, (list, np.array)):
+                for i in range(len(result)):
+                    index = p + i * 4
+                    if type == "Integer":
+                        self.HEAP32[index >> 2] = int(result[i])
+                    elif type == "Float":
+                        self.HEAPF32[index >> 2] = float(result[i])
+                    elif type == "Boolean":
+                        self.HEAP8[index >> 0] = 1 if result[i] else 0
+                    else:
+                        raise ValueError(f"internal glGet error, bad type: {type}")
+                return
+            # elif isinstance(result, (WebGLBuffer, WebGLProgram, WebGLFramebuffer, WebGLRenderbuffer, WebGLQuery, WebGLSampler, WebGLSync, WebGLTransformFeedback, WebGLVertexArrayObject, WebGLTexture)):
+            #     ret = int(result.name)
+            else:
+                self.GL_lasterror = 1280
+                logging.error('Unhandled error in emscriptenWebGLGet')
+                return
+
+        if type == "Integer64":
+            tempI64 = [ret & 0xFFFFFFFF, (int(math.floor(ret / 4294967296)) & 0xFFFFFFFF)]
+            self.HEAP32[p >> 2] = tempI64[0]
+            self.HEAP32[p + 4 >> 2] = tempI64[1]
+        elif type == "Integer":
+            self.HEAP32[p >> 2] = int(ret)
+        elif type == "Float":
+            self.HEAPF32[p >> 2] = float(ret)
+        elif type == "Boolean":
+            self.HEAP8[p >> 0] = 1 if ret else 0
+        else:
+            raise ValueError(f"internal glGet error, bad type: {type}")
+        
     def log(self, param0):
         return
         out = {}

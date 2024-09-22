@@ -20,7 +20,7 @@ def display_all_game_info():
     else:
         print("No game info entries found.")
         
-async def main():
+def main():
     # Setup logging
     setup_logging()
     logging.info("Starting LOK Discord Bot")
@@ -34,4 +34,4 @@ async def main():
     # display_all_game_info()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

@@ -4,6 +4,7 @@ import numpy as np
 from pathlib import Path
 import io
 import logging
+import codecs
 
 class customWebSocket(websocket.WebSocketApp):
     def __init__(self, *args, **kwargs):
@@ -73,9 +74,13 @@ MEMFS = {
 IDBFS = NODEFS = WORKERFS = MEMFS
 
 class FS(io.FileIO):
-    def __init__(self, fd, path):
+    def __init__(self, fd, path, tty=False):
         super().__init__(fd)
         self.path = path
+        if tty:
+            self.tty = {'input': [], 'output': []}
+        else:
+            self.tty = None
 
     def read_to_buffer(self, buffer, offset, length):
         contents = self.read(length)
@@ -84,6 +89,17 @@ class FS(io.FileIO):
         buffer[offset:offset + size] = contents_np
         return size
         
+    def write_to_buffer(self, buffer, offset, length):
+        for i in range(length):
+            val = buffer[offset + i]
+            if not val or val == 10:
+                logging.info(UTF8ArrayToString(self.tty['output'], 0))
+                self.tty['output'] = []
+            else:
+                if val != 0:
+                    self.tty['output'].append(val)
+        return i+1
+    
 class JSSYS:
     def __init__(self, o):
         self.varargs =  0
@@ -125,6 +141,29 @@ class JSSYS:
                 break
 
         return ret
+    
+    def doWritev(self, stream: FS, iov, iovcnt):
+        ret = 0
+
+        for i in range(iovcnt):
+            ptr = self.o.HEAP32[(iov + i * 8) >> 2]
+            length = self.o.HEAP32[(iov + (i * 8 + 4)) >> 2]
+            curr = stream.write_to_buffer(self.o.HEAP8, ptr, length)
+            if curr < 0:
+                return -1
+            
+            ret += curr
+            
+        return ret
+
+def UTF8ArrayToString(u8Array, idx: int):
+    UTF8Decoder = codecs.getincrementaldecoder('utf-8')()
+    endPtr = idx
+    while len(u8Array)>endPtr and u8Array[endPtr]:
+        endPtr += 1
+
+    return UTF8Decoder.decode(bytes(u8Array[idx:endPtr]))
+
 class ERRNO_CODES:
     EPERM=1
     ENOENT=2
@@ -247,3 +286,20 @@ class ERRNO_CODES:
     ENOTRECOVERABLE=131
     EOWNERDEAD=130
     ESTRPIPE=86
+
+class JSModule:
+    webglContextAttributes = {
+        'premultipliedAlpha': False,  # Example value
+        'preserveDrawingBuffer': False  # Example value
+    }
+    shouldQuit = None  # Example initialization
+
+ASM_CONSTS = [
+    lambda: JSModule.webglContextAttributes.get('premultipliedAlpha'),
+    lambda: JSModule.webglContextAttributes.get('preserveDrawingBuffer'),
+    lambda: JSModule.shouldQuit is not None,
+    lambda: logging.error('ASM_CONSTS3 not defined')
+]
+
+if __name__ == '__main__':
+    print(ASM_CONSTS[1]())

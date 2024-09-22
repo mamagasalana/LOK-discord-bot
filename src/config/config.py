@@ -20,6 +20,7 @@ def load_environment_variables() -> dict:
         "MAIL_URL": load_env_variable("MAIL_URL"),
         "TOKEN": load_env_variable("TOKEN"),
         "CHANNEL_ID": load_env_variable("CHANNEL_ID"),
+        "GUILD_ID": load_env_variable("GUILD_ID"),
         "CODE_EXPIRY_TIME": load_env_variable("CODE_EXPIRY_TIME", "60"),
         "AWS_ACCESS_KEY": load_env_variable("AWS_ACCESS_KEY"),
         "AWS_SECRET_ACCESS_KEY": load_env_variable("AWS_SECRET_ACCESS_KEY"),
@@ -39,6 +40,7 @@ LOGIN_URL = environment_variables["LOGIN_URL"]
 MAIL_URL = environment_variables["MAIL_URL"]
 TOKEN = environment_variables["TOKEN"]
 CHANNEL_ID = environment_variables["CHANNEL_ID"]
+GUILD_ID = environment_variables["GUILD_ID"]
 CODE_EXPIRY_TIME = environment_variables["CODE_EXPIRY_TIME"]
 AWS_ACCESS_KEY = environment_variables["AWS_ACCESS_KEY"]
 AWS_SECRET_ACCESS_KEY = environment_variables["AWS_SECRET_ACCESS_KEY"]

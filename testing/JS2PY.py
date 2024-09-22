@@ -7,7 +7,7 @@ import logging
 
 # local modules
 from wasm_base import wasm_base
-from websocketmanager import WebSocketClientManager
+from websocketmanager import WebSocketClientManager, UTF8ArrayToString
 
 class LOK_JS2PY(wasm_base):
     def __init__(self, wasmfile= "testing/js_testing/test2.wasm"):
@@ -1288,9 +1288,7 @@ class LOK_JS2PY(wasm_base):
     def HEAPF64(self):
         return self.buffer(np.float64)
 
-    @property
-    def UTF8Decoder(self):
-        return codecs.getincrementaldecoder('utf-8')()
+
     
     def lengthBytesUTF8(self, s):
         return len(s.encode('utf-8')) 
@@ -1315,14 +1313,7 @@ class LOK_JS2PY(wasm_base):
         return bytes_to_copy
 
     def UTF8ToString(self,ptr):
-        return self.UTF8ArrayToString(self.HEAPU8, ptr)
-
-    def UTF8ArrayToString(self, u8Array, idx):
-        endPtr = idx
-        while u8Array[endPtr]:
-            endPtr += 1
-
-        return self.UTF8Decoder.decode(bytes(u8Array[idx:endPtr]))
+        return UTF8ArrayToString(self.HEAPU8, ptr)
 
     def Pointer_stringify(self, ptr, length=None):
         if (length == 0 or  not ptr):
@@ -1421,6 +1412,152 @@ class LOK_JS2PY(wasm_base):
         if not self.runtimeInitialized:
             return self.dynamicAlloc(size)
         return self._malloc(size)
+    
+    def intArrayFromString(self, stringy, dontAddNull=False, length=None):
+        # Determine the length of the array (with room for a null terminator unless dontAddNull is True)
+        if length and length > 0:
+            len_bytes = length
+        else:
+            len_bytes = self.lengthBytesUTF8(stringy) + 1  # +1 for null terminator
+
+        # Create an array to hold the UTF-8 bytes
+        u8array = [0] * len_bytes
+
+        # Convert string to UTF-8 array
+        numBytesWritten = self.stringToUTF8Array(stringy, u8array, 0, len(u8array))
+
+        # Optionally remove the null terminator
+        if dontAddNull:
+            u8array = u8array[:numBytesWritten]
+
+        return u8array
+
+    def setValue(self, ptr, value, type=None, noSafe=False):
+        # Default type is "i8"
+        type = type or "i8"
+        
+        # Handle pointers as i32
+        if type[-1] == "*":
+            type = "i32"
+        
+        # Perform value assignment based on type
+        if type == "i1" or type == "i8":
+            self.HEAP8[ptr] = value 
+        elif type == "i16":
+            self.HEAP16[ptr >> 1] = value
+        elif type == "i32":
+            self.HEAP32[ptr >> 2] = value
+        elif type == "i64":
+            # Handle i64 by splitting the value into two 32-bit parts
+            tempI64 = [0, 0]
+            tempI64[0] = value & 0xFFFFFFFF  # Lower 32 bits
+            tempI64[1] = (math.floor(value / 4294967296)) & 0xFFFFFFFF  # Upper 32 bits
+            self.HEAP32[ptr >> 2] = tempI64[0]
+            self.HEAP32[(ptr + 4) >> 2] = tempI64[1]
+        elif type == "float":
+            self.HEAPF32[ptr >> 2] = value
+        elif type == "double":
+            self.HEAPF64[ptr >> 3] = value
+        else:
+            # Invalid type
+            logging.error("invalid type for setValue: " + type)
+        
+    def getNativeTypeSize(self, type):
+        if type in ["i1", "i8"]:
+            return 1
+        elif type == "i16":
+            return 2
+        elif type == "i32":
+            return 4
+        elif type == "i64":
+            return 8
+        elif type == "float":
+            return 4
+        elif type == "double":
+            return 8
+        else:
+            if type.endswith("*"):  # Pointer types
+                return 4  # Assume 32-bit pointers
+            elif type.startswith("i"):  # Types like i16, i64, etc.
+                bits = int(type[1:])
+                assert(bits % 8 == 0)
+                return bits // 8
+            else:
+                return 0  # Unknown type
+            
+    def allocate(self, slab, types, allocator=None, ptr=None):        
+
+        if isinstance(slab, int):
+            zeroinit = True
+            size = slab
+        else:
+            zeroinit = False
+            size = len(slab)
+        
+        singleType = types if isinstance(types, str) else None
+        ret = None
+        
+        # Determine the allocation strategy
+        if allocator == self.ALLOC_NONE:
+            ret = ptr
+        else:
+            # Use the appropriate allocator
+            allocators = [self._malloc, self.staticAlloc, self.stackAlloc, self.dynamicAlloc]
+            funcidx = self.ALLOC_STATIC if allocator is None else allocator
+            ret = allocators[funcidx](max(size, 1 if singleType else len(types)))
+        
+        # Zero initialize the memory if needed
+        if zeroinit:
+            stop = ret + (size & ~3)
+            ptr = ret
+            assert (ret & 3) == 0
+            
+            while ptr < stop:
+                self.HEAP32[ptr // 4] = 0  # Emulate 32-bit zeroing
+                ptr += 4
+            
+            stop = ret + size
+            while ptr < stop:
+                self.HEAPU8[ptr] = 0  # Emulate byte zeroing
+                ptr += 1
+            
+            return ret
+        
+        # Handle the single type case for i8
+        if singleType == "i8":
+            if isinstance(slab, list) or isinstance(slab, np.array):
+                self.HEAPU8[ret:ret + len(slab)] = slab
+            else:
+                self.HEAPU8[ret:ret + len(slab)] = bytearray(slab)
+            
+            return ret
+        
+        # General case for allocating types
+        i = 0
+        previousType = None
+        typeSize = 0
+        
+        while i < size:
+            curr = slab[i]
+            type = singleType or types[i]
+            
+            if type == 0:
+                i += 1
+                continue
+            
+            if type == "i64":
+                type = "i32"  # Handle i64 as i32
+            
+            self.setValue(ret + i, curr, type)
+            
+            if previousType != type:
+                typeSize = self.getNativeTypeSize(type)
+                previousType = type
+            
+            i += typeSize
+        
+        return ret
+    
     
     def _AT_INIT(self):
         logging.info("AT_INIT >> __GLOBAL__sub_I_AIScriptingClasses_cpp")        

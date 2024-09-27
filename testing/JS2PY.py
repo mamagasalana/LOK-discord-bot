@@ -1269,6 +1269,10 @@ class LOK_JS2PY(wasm_base):
         return self.buffer(np.int32)
 
     @property
+    def HEAP64(self):
+        return self.buffer(np.int64)
+    
+    @property
     def HEAPU8(self):
         return self.buffer(np.uint8)
     
@@ -1365,16 +1369,10 @@ class LOK_JS2PY(wasm_base):
     def reallocBuffer(self, size):
         PAGE_MULTIPLE = self.WASM_PAGE_SIZE 
         size = self.alignUp(size, PAGE_MULTIPLE)
-        oldSize = self.buffer.nbytes
+        oldSize = self.HEAP8.nbytes
 
-        try:
-            additional_pages = (size - oldSize) // self.WASM_PAGE_SIZE
-            new_size = oldSize + additional_pages * self.WASM_PAGE_SIZE
-            new_buffer = np.zeros(new_size, dtype=np.uint8)
-            new_buffer[:oldSize] = self.buffer
-            self.buffer = new_buffer
-        except Exception as e:
-            return None
+        ret = self.memory.grow(self.store, (size - oldSize) // PAGE_MULTIPLE)
+        return True
             
     def alignMemory(self, size, factor=16):
         ret = size = math.ceil(size / factor) * factor;

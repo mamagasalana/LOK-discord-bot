@@ -13,15 +13,16 @@ import math
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'testing')))
 
-from websocketmanager import customWebSocket, JSSYS,ERRNO_CODES, FS, ASM_CONSTS, UTF8ArrayToString
+from websocketmanager import customWebSocket, JSSYS,ERRNO_CODES, FS, ASM_CONSTS, UTF8ArrayToString, CANVAS, GL
 
 # HEAP32_DEBUG= [5914000, 5913988, 5913980, 5913984, 5914448, 5914456] 
-# HEAP32_DEBUG_FULL = HEAP32_DEBUG + [5914000,  5202024, 5949232, 5084484, 5913996, 5949244, 5271560, 5271564, 5271108, 18729848, 18730008]
-HEAP32_DEBUG=  [5914040, 5949364, 5914048,5913976, 5913992, 5913996, 5914000]
-HEAP32_DEBUG_FULL = [5914040, 5949364,  5914048,5913976, 5913992, 5913996, 5914000]
+# HEAP32_DEBUG_FULL = HEAP32_DEBUG + [5914000,  5202024, 5949232, 5084484, 5913996, 5949244, 5271560, 5271564, 5271108, 18729848, 18730008, ]
+HEAP32_DEBUG=  [5949536, 12768780, 30976960, 5914040, 5949364, 5914048,5913976, 5913992, 5913996, 5914000]
+# HEAP64_DEBUG= [30981832, 30997976]
+HEAP64_DEBUG = []
 
 def log_wasm(k,v):
-    logging.info(f"from funcname {k}, {dict(sorted(v.items()))}")
+    logging.info(f"from funcname {k}, {v.items()}")
 
 def logwrap(func):
     @wraps(func)
@@ -31,22 +32,30 @@ def logwrap(func):
             args_flatten = [f'(index == {args[0]})'] + [f'(a{idx} == {arg})' for idx, arg in enumerate(args[1:], start=1)]
             args_flatten_txt = ' && '.join(args_flatten)
         log_msg = f"'{func.__name__}' {args_flatten_txt}"
+            
+        if self.func_stack:
+            for k, v in self.func_stack.items():
+                log_wasm(k ,v)
+            
+            self.func_stack = {}
         
-        if HEAP32_DEBUG:
-            out = {x: self.HEAP32[x//4] for x in HEAP32_DEBUG_FULL}
-            # out.update({x: self.HEAP32[x//4] for x in range(min(HEAP32_DEBUG), max(HEAP32_DEBUG)+4, 4)})
-            log_msg += f" ||| {out}"
-            if self.func_stack:
-                for k, v in self.func_stack.items():
-                    log_wasm(k ,v)
-                
-                self.func_stack = {}
-        logging.info(log_msg)
         try:
             ret =  func(self, *args, **kwargs)
         except Exception as e:
             logging.error(f"'{func.__name__}' failed", exc_info=True)
             raise e
+        
+        log_msg += f" ||| return {ret}"
+
+        if HEAP64_DEBUG:
+            out = {x: self.HEAP64[x//8] for x in HEAP64_DEBUG}
+            log_msg += f" ||| {out}"
+
+        if HEAP32_DEBUG:
+            out = {x: self.HEAP32[x//4] for x in HEAP32_DEBUG}
+            log_msg += f" ||| {out}"
+
+        logging.info(log_msg)
         return ret
     
     return wrapper
@@ -93,28 +102,14 @@ class wasm_base:
         self.GLctx_VERSION= 7938
         self.GLctx_SHADING_LANGUAGE_VERSION = 35724
         self.GLctx_getSupportedExtensions= ['EXT_clip_control', 'EXT_color_buffer_float', 'EXT_color_buffer_half_float', 'EXT_conservative_depth', 'EXT_depth_clamp', 'EXT_disjoint_timer_query_webgl2', 'EXT_float_blend', 'EXT_polygon_offset_clamp', 'EXT_render_snorm', 'EXT_texture_compression_bptc', 'EXT_texture_compression_rgtc', 'EXT_texture_filter_anisotropic', 'EXT_texture_mirror_clamp_to_edge', 'EXT_texture_norm16', 'KHR_parallel_shader_compile', 'NV_shader_noperspective_interpolation', 'OES_draw_buffers_indexed', 'OES_sample_variables', 'OES_shader_multisample_interpolation', 'OES_texture_float_linear', 'OVR_multiview2', 'WEBGL_blend_func_extended', 'WEBGL_clip_cull_distance', 'WEBGL_compressed_texture_s3tc', 'WEBGL_compressed_texture_s3tc_srgb', 'WEBGL_debug_renderer_info', 'WEBGL_debug_shaders', 'WEBGL_lose_context', 'WEBGL_multi_draw', 'WEBGL_polygon_mode', 'WEBGL_provoking_vertex', 'WEBGL_stencil_texturing']
-        self.GLctx_getParameter = {
-            7936 : 'WebKit',
-            7937 : 'WebKit WebGL',
-            7938 : 'WebGL 2.0 (OpenGL ES 3.0 Chromium)',
-            35724 : 'WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)',
-            34467: np.array([33776, 33777, 33778, 33779, 35916, 35917, 35918, 35919], dtype=np.uint32),
-            34016 : 33984,
-        }
-
-        self.GL_lasterror = None
-        self.GL_stringCache = {}
-        self.GL_contexts = []
-        self.GL_currentContext = None
-        self.GL_contexts_ext  = {
-            'WEBGL_compressed_texture_s3tc_srgb' : 'WebGLCompressedTextureS3TCsRGB',
-            'EXT_color_buffer_float' : 'EXTColorBufferFloat',
-            }
 
         self.ALLOC_NORMAL = 0
         self.ALLOC_STACK = 1
         self.ALLOC_STATIC = 2
         self.ALLOC_NONE = 4
+
+        self.canvas = CANVAS()
+        self.GL = GL()
 
     @logwrap
     def abort(self,param0):
@@ -136,7 +131,7 @@ class wasm_base:
                 self.TOTAL_MEMORY = min(self.alignUp((3 * self.TOTAL_MEMORY + 2147483648) // 4, PAGE_MULTIPLE), LIMIT)
 
         replacement = self.reallocBuffer(self.TOTAL_MEMORY)
-        if (not replacement or replacement.nbytes != self.TOTAL_MEMORY):
+        if (not replacement or self.HEAP8.nbytes != self.TOTAL_MEMORY):
             self.TOTAL_MEMORY = OLD_TOTAL_MEMORY
             return False
         
@@ -560,17 +555,14 @@ class wasm_base:
     
     @logwrap
     def _JS_Cursor_SetShow(self,param0):
-        logging.error("_JS_Cursor_SetShow not implemented")
         return 
     
     @logwrap
     def _JS_Eval_ClearInterval(self,param0):
-        logging.error("_JS_Eval_ClearInterval not implemented")
         return 
     
     @logwrap
     def _JS_Eval_OpenURL(self,param0):
-        logging.error("_JS_Eval_OpenURL not implemented")
         return 
     
     @logwrap
@@ -590,6 +582,8 @@ class wasm_base:
     
     @logwrap
     def _JS_Log_Dump(self,ptr,param1):
+        if ptr ==5950112:
+            raise ValueError('hehe')
         strr = self.Pointer_stringify(ptr);
         if param1 in [0, 1, 4]:
             logging.error(strr)
@@ -725,9 +719,11 @@ class wasm_base:
         return self.lengthBytesUTF8(url)
     
     @logwrap
-    def _JS_SystemInfo_GetGPUInfo(self,param0,param1):
-        logging.error("_JS_SystemInfo_GetGPUInfo not implemented")
-        return 0
+    def _JS_SystemInfo_GetGPUInfo(self,buffer,bufferSize):
+        gpuinfo = 'ANGLE (Intel, Intel(R) UHD Graphics (0x00009BC4) Direct3D11 vs_5_0 ps_5_0, D3D11)'
+        if (buffer):
+            self.stringToUTF8(gpuinfo, buffer, bufferSize);
+        return self.lengthBytesUTF8(gpuinfo)
     
     @logwrap
     def _JS_SystemInfo_GetLanguage(self,param0,param1):
@@ -1719,8 +1715,21 @@ class wasm_base:
         return 0
     
     @logwrap
-    def _emscripten_get_canvas_element_size(self,param0,param1,param2):
-        logging.error("_emscripten_get_canvas_element_size not implemented")
+    def _emscripten_get_canvas_element_size(self,target, width, height):
+        canvas = self.canvas
+        if canvas.canvasSharedPtr:
+            w = self.HEAP32[canvas.canvasSharedPtr >> 2]
+            h = self.HEAP32[canvas.canvasSharedPtr + 4 >> 2]
+            self.HEAP32[width >> 2] = w
+            self.HEAP32[height >> 2] = h
+        elif canvas.offscreenCanvas:
+            self.HEAP32[width >> 2] = canvas.offscreenCanvas.width
+            self.HEAP32[height >> 2] = canvas.offscreenCanvas.height
+        elif not canvas.controlTransferredOffscreen:
+            self.HEAP32[width >> 2] = canvas.width
+            self.HEAP32[height >> 2] = canvas.height
+        else:
+            return -4
         return 0
     
     @logwrap
@@ -1939,7 +1948,7 @@ class wasm_base:
             'ctx' : 'Not implemented'
         }
         self.HEAP32[handle >> 2] = contextAttributes["explicitSwapControl"]
-        self.GL_contexts = [None] * handle + [context]
+        self.GL.contexts = [None] * handle + [context]
         return handle
 
     @logwrap
@@ -1949,18 +1958,18 @@ class wasm_base:
     
     @logwrap
     def _emscripten_webgl_enable_extension(self,contextHandle, extension):
-        context  = self.GL_contexts[contextHandle]
+        context  = self.GL.contexts[contextHandle]
         extString = self.Pointer_stringify(extension)
         if extString.startswith("GL_"):
             extString = extString[3:]
-        ext = self.GL_contexts_ext.get(extString, False)
+        ext = self.GL.contexts_ext.get(extString, False)
         ret = 1 if ext else 0
         return ret
     
     @logwrap
     def _emscripten_webgl_get_current_context(self):
-        if self.GL_currentContext: 
-            return self.GL_currentContext['handle']
+        if self.GL.currentContext: 
+            return self.GL.currentContext['handle']
         else:
             return 0
     
@@ -1985,7 +1994,7 @@ class wasm_base:
     @logwrap
     def _emscripten_webgl_make_context_current(self,contextHandle):
         try:
-            self.GL_currentContext = self.GL_contexts[contextHandle]
+            self.GL.currentContext = self.GL.contexts[contextHandle]
             return 0
         except:
             return -5 
@@ -2054,102 +2063,104 @@ class wasm_base:
     
     @logwrap
     def _glActiveTexture(self,param0):
-        logging.error("_glActiveTexture not implemented")
+        logging.warning("_glActiveTexture not implemented -- ignored")
         return 
     
     @logwrap
     def _glAttachShader(self,param0,param1):
-        logging.error("_glAttachShader not implemented")
+        logging.warning("_glAttachShader not implemented -- ignored")
         return 
     
     @logwrap
     def _glBeginQuery(self,param0,param1):
-        logging.error("_glBeginQuery not implemented")
+        logging.warning("_glBeginQuery not implemented -- ignored")
         return 
     
     @logwrap
     def _glBeginTransformFeedback(self,param0):
-        logging.error("_glBeginTransformFeedback not implemented")
+        logging.warning("_glBeginTransformFeedback not implemented -- ignored")
         return 
     
     @logwrap
     def _glBindAttribLocation(self,param0,param1,param2):
-        logging.error("_glBindAttribLocation not implemented")
+        logging.warning("_glBindAttribLocation not implemented -- ignored")
         return 
     
     @logwrap
-    def _glBindBuffer(self,param0,param1):
-        logging.error("_glBindBuffer not implemented")
-        return 
-    
+    def _glBindBuffer(self,target,buffer):
+        if (target == 35051):
+            self.GLctx_currentPixelPackBufferBinding = buffer
+        elif (target == 35052):
+            self.GLctx_currentPixelUnpackBufferBinding = buffer
+
     @logwrap
     def _glBindBufferBase(self,param0,param1,param2):
-        logging.error("_glBindBufferBase not implemented")
+        logging.warning("_glBindBufferBase not implemented -- ignored")
         return 
     
     @logwrap
     def _glBindBufferRange(self,param0,param1,param2,param3,param4):
-        logging.error("_glBindBufferRange not implemented")
+        logging.warning("_glBindBufferRange not implemented -- ignored")
         return 
     
     @logwrap
     def _glBindFramebuffer(self,param0,param1):
-        logging.error("_glBindFramebuffer not implemented")
+        logging.warning("_glBindFramebuffer not implemented -- ignored")
         return 
     
     @logwrap
     def _glBindRenderbuffer(self,param0,param1):
-        logging.error("_glBindRenderbuffer not implemented")
+        logging.warning("_glBindRenderbuffer not implemented -- ignored")
         return 
     
     @logwrap
     def _glBindSampler(self,param0,param1):
-        logging.error("_glBindSampler not implemented")
+        logging.warning("_glBindSampler not implemented -- ignored")
         return 
     
     @logwrap
     def _glBindTexture(self,param0,param1):
-        logging.error("_glBindTexture not implemented")
+        logging.warning("_glBindTexture not implemented -- ignored")
         return 
     
     @logwrap
     def _glBindTransformFeedback(self,param0,param1):
-        logging.error("_glBindTransformFeedback not implemented")
+        logging.warning("_glBindTransformFeedback not implemented -- ignored")
         return 
     
     @logwrap
     def _glBindVertexArray(self,param0):
-        logging.error("_glBindVertexArray not implemented")
+        logging.warning("_glBindVertexArray not implemented -- ignored")
         return 
     
     @logwrap
     def _glBlendEquation(self,param0):
-        logging.error("_glBlendEquation not implemented")
+        logging.warning("_glBlendEquation not implemented -- ignored")
         return 
     
     @logwrap
     def _glBlendEquationSeparate(self,param0,param1):
-        logging.error("_glBlendEquationSeparate not implemented")
+        logging.warning("_glBlendEquationSeparate not implemented -- ignored")
         return 
     
     @logwrap
     def _glBlendFuncSeparate(self,param0,param1,param2,param3):
-        logging.error("_glBlendFuncSeparate not implemented")
+        logging.warning("_glBlendFuncSeparate not implemented -- ignored")
         return 
     
     @logwrap
     def _glBlitFramebuffer(self,param0,param1,param2,param3,param4,param5,param6,param7,param8,param9):
-        logging.error("_glBlitFramebuffer not implemented")
+        logging.warning("_glBlitFramebuffer not implemented -- ignored")
         return 
     
     @logwrap
     def _glBufferData(self,param0,param1,param2,param3):
-        logging.error("_glBufferData not implemented")
+        logging.warning("_glBufferData not implemented -- ignored")
         return 
     
     @logwrap
     def _glBufferSubData(self,param0,param1,param2,param3):
-        logging.error("_glBufferSubData not implemented")
+        logging.warning("_glBufferSubData not implemented -- ignored")
         return 
     
     @logwrap
@@ -2159,92 +2170,90 @@ class wasm_base:
     
     @logwrap
     def _glClear(self,param0):
-        logging.error("_glClear not implemented")
         return 
     
     @logwrap
     def _glClearBufferfi(self,param0,param1,param2,param3):
-        logging.error("_glClearBufferfi not implemented")
         return 
     
     @logwrap
     def _glClearBufferfv(self,param0,param1,param2):
-        logging.error("_glClearBufferfv not implemented")
         return 
     
     @logwrap
     def _glClearBufferuiv(self,param0,param1,param2):
-        logging.error("_glClearBufferuiv not implemented")
         return 
     
     @logwrap
     def _glClearColor(self,param0,param1,param2,param3):
-        logging.error("_glClearColor not implemented")
         return 
     
     @logwrap
     def _glClearDepthf(self,param0):
-        logging.error("_glClearDepthf not implemented")
         return 
     
     @logwrap
     def _glClearStencil(self,param0):
-        logging.error("_glClearStencil not implemented")
         return 
     
     @logwrap
     def _glColorMask(self,param0,param1,param2,param3):
-        logging.error("_glColorMask not implemented")
+        logging.warning("_glColorMask not implemented -- ignored")
         return 
     
     @logwrap
     def _glCompileShader(self,param0):
-        logging.error("_glCompileShader not implemented")
         return 
     
     @logwrap
     def _glCompressedTexImage2D(self,param0,param1,param2,param3,param4,param5,param6,param7):
-        logging.error("_glCompressedTexImage2D not implemented")
+        logging.warning("_glCompressedTexImage2D not implemented -- ignored")
         return 
     
     @logwrap
     def _glCompressedTexSubImage2D(self,param0,param1,param2,param3,param4,param5,param6,param7,param8):
-        logging.error("_glCompressedTexSubImage2D not implemented")
+        logging.warning("_glCompressedTexSubImage2D not implemented -- ignored")
         return 
     
     @logwrap
     def _glCompressedTexSubImage3D(self,param0,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10):
-        logging.error("_glCompressedTexSubImage3D not implemented")
+        logging.warning("_glCompressedTexSubImage3D not implemented -- ignored")
         return 
     
     @logwrap
     def _glCopyBufferSubData(self,param0,param1,param2,param3,param4):
-        logging.error("_glCopyBufferSubData not implemented")
+        logging.warning("_glCopyBufferSubData not implemented -- ignored")
         return 
     
     @logwrap
     def _glCopyTexImage2D(self,param0,param1,param2,param3,param4,param5,param6,param7):
-        logging.error("_glCopyTexImage2D not implemented")
+        logging.warning("_glCopyTexImage2D not implemented -- ignored")
         return 
     
     @logwrap
     def _glCopyTexSubImage2D(self,param0,param1,param2,param3,param4,param5,param6,param7):
-        logging.error("_glCopyTexSubImage2D not implemented")
+        logging.warning("_glCopyTexSubImage2D not implemented -- ignored")
         return 
     
     @logwrap
     def _glCreateProgram(self):
-        logging.error("_glCreateProgram not implemented")
-        return 0
+        program=  {'arr': [], 'type': 'program'}
+        idx = self.GL.getNewId(self.GL.programs)
+        program['name'] = idx
+        self.GL.programs[idx] = program
+        return idx
     
     @logwrap
     def _glCreateShader(self,param0):
-        logging.error("_glCreateShader not implemented")
-        return 0
+        shader=  {'arr': [], 'type': 'shader'}
+        idx = self.GL.getNewId(self.GL.shaders)
+        shader['name'] = idx
+        self.GL.shaders[idx] = shader
+        return idx
     
     @logwrap
     def _glCullFace(self,param0):
-        logging.error("_glCullFace not implemented")
+        logging.warning("_glCullFace not implemented -- ignored")
         return 
     
     @logwrap
@@ -2304,12 +2313,12 @@ class wasm_base:
     
     @logwrap
     def _glDepthFunc(self,param0):
-        logging.error("_glDepthFunc not implemented")
+        logging.warning("_glDepthFunc not implemented -- ignored")
         return 
     
     @logwrap
     def _glDepthMask(self,param0):
-        logging.error("_glDepthMask not implemented")
+        logging.warning("_glDepthMask not implemented -- ignored")
         return 
     
     @logwrap
@@ -2319,72 +2328,71 @@ class wasm_base:
     
     @logwrap
     def _glDisable(self,param0):
-        logging.error("_glDisable not implemented")
+        logging.warning("_glDisable not implemented -- ignore")
         return 
     
     @logwrap
     def _glDisableVertexAttribArray(self,param0):
-        logging.error("_glDisableVertexAttribArray not implemented")
         return 
     
     @logwrap
     def _glDrawArrays(self,param0,param1,param2):
-        logging.error("_glDrawArrays not implemented")
+        logging.warning("_glDrawArrays not implemented -- ignore")
         return 
     
     @logwrap
     def _glDrawArraysInstanced(self,param0,param1,param2,param3):
-        logging.error("_glDrawArraysInstanced not implemented")
+        logging.warning("_glDrawArraysInstanced not implemented -- ignore")
         return 
     
     @logwrap
     def _glDrawBuffers(self,param0,param1):
-        logging.error("_glDrawBuffers not implemented")
         return 
     
     @logwrap
     def _glDrawElements(self,param0,param1,param2,param3):
-        logging.error("_glDrawElements not implemented")
         return 
     
     @logwrap
     def _glDrawElementsInstanced(self,param0,param1,param2,param3,param4):
-        logging.error("_glDrawElementsInstanced not implemented")
         return 
     
     @logwrap
     def _glEnable(self,param0):
-        logging.error("_glEnable not implemented")
         return 
     
     @logwrap
     def _glEnableVertexAttribArray(self,param0):
-        logging.error("_glEnableVertexAttribArray not implemented")
         return 
     
     @logwrap
     def _glEndQuery(self,param0):
-        logging.error("_glEndQuery not implemented")
         return 
     
     @logwrap
     def _glEndTransformFeedback(self):
-        logging.error("_glEndTransformFeedback not implemented")
         return 
     
     @logwrap
-    def _glFenceSync(self,param0,param1):
+    def _glFenceSync(self,condition, flags):
         logging.error("_glFenceSync not implemented")
         return 0
+        # sync = self.GLctx_fenceSync[(condition, flags)]
+        # if sync:
+        #     idx = self.GL.getNewId(self.GL.syncs)
+        #     sync['name'] = idx
+        #     self.GL.syncs[idx] = sync
+        #     return idx
+        # else:
+        #     return 0 
+        
     
     @logwrap
     def _glFinish(self):
-        logging.error("_glFinish not implemented")
         return 
     
     @logwrap
     def _glFlush(self):
-        logging.error("_glFlush not implemented")
         return 
     
     @logwrap
@@ -2394,67 +2402,96 @@ class wasm_base:
     
     @logwrap
     def _glFramebufferRenderbuffer(self,param0,param1,param2,param3):
-        logging.error("_glFramebufferRenderbuffer not implemented")
         return 
     
     @logwrap
     def _glFramebufferTexture2D(self,param0,param1,param2,param3,param4):
-        logging.error("_glFramebufferTexture2D not implemented")
         return 
     
     @logwrap
     def _glFramebufferTextureLayer(self,param0,param1,param2,param3,param4):
-        logging.error("_glFramebufferTextureLayer not implemented")
         return 
     
     @logwrap
     def _glFrontFace(self,param0):
-        logging.error("_glFrontFace not implemented")
+        logging.warning("_glFrontFace not implemented -- warning")
         return 
     
     @logwrap
-    def _glGenBuffers(self,param0,param1):
-        logging.error("_glGenBuffers not implemented")
-        return 
+    def _glGenBuffers(self,n,buffers):
+        for i in range(n):
+            buffer=  {'arr': [], 'type': 'buffer'}
+            idx = self.GL.getNewId(self.GL.buffers)
+            buffer['name'] = idx
+            self.GL.buffers[idx] = buffer
+            self.HEAP32[(buffers + i * 4) >> 2] = idx
     
     @logwrap
-    def _glGenFramebuffers(self,param0,param1):
-        logging.error("_glGenFramebuffers not implemented")
-        return 
+    def _glGenFramebuffers(self,n,ids):
+        for i in range(n):
+            buffer=  {'arr': [], 'type': 'Framebuffer'}
+            idx = self.GL.getNewId(self.GL.framebuffers)
+            buffer['name'] = idx
+            self.GL.framebuffers[idx] = buffer
+            self.HEAP32[(ids + i * 4) >> 2] = idx
     
     @logwrap
-    def _glGenQueries(self,param0,param1):
-        logging.error("_glGenQueries not implemented")
-        return 
+    def _glGenQueries(self,n,ids):
+        for i in range(n):
+            buffer=  {'arr': [], 'type': 'query'}
+            idx = self.GL.getNewId(self.GL.queries)
+            buffer['name'] = idx
+            self.GL.queries[idx] = buffer
+            self.HEAP32[(ids + i * 4) >> 2] = idx
     
     @logwrap
-    def _glGenRenderbuffers(self,param0,param1):
-        logging.error("_glGenRenderbuffers not implemented")
-        return 
+    def _glGenRenderbuffers(self,n,ids):
+        for i in range(n):
+            buffer=  {'arr': [], 'type': 'renderbuffer'}
+            idx = self.GL.getNewId(self.GL.renderbuffers)
+            buffer['name'] = idx
+            self.GL.renderbuffers[idx] = buffer
+            self.HEAP32[(ids + i * 4) >> 2] = idx
     
     @logwrap
-    def _glGenSamplers(self,param0,param1):
-        logging.error("_glGenSamplers not implemented")
-        return 
+    def _glGenSamplers(self,n,ids):
+        for i in range(n):
+            buffer=  {'arr': [], 'type': 'sampler'}
+            idx = self.GL.getNewId(self.GL.samplers)
+            buffer['name'] = idx
+            self.GL.samplers[idx] = buffer
+            self.HEAP32[(ids + i * 4) >> 2] = idx
     
     @logwrap
-    def _glGenTextures(self,param0,param1):
-        logging.error("_glGenTextures not implemented")
-        return 
+    def _glGenTextures(self,n,ids):
+        for i in range(n):
+            buffer=  {'arr': [], 'type': 'texture'}
+            idx = self.GL.getNewId(self.GL.textures)
+            buffer['name'] = idx
+            self.GL.textures[idx] = buffer
+            self.HEAP32[(ids + i * 4) >> 2] = idx
     
     @logwrap
-    def _glGenTransformFeedbacks(self,param0,param1):
-        logging.error("_glGenTransformFeedbacks not implemented")
-        return 
+    def _glGenTransformFeedbacks(self,n,ids):
+        for i in range(n):
+            buffer=  {'arr': [], 'type': 'transformfeedback'}
+            idx = self.GL.getNewId(self.GL.transformfeedbacks)
+            buffer['name'] = idx
+            self.GL.transformfeedbacks[idx] = buffer
+            self.HEAP32[(ids + i * 4) >> 2] = idx
     
     @logwrap
-    def _glGenVertexArrays(self,param0,param1):
-        logging.error("_glGenVertexArrays not implemented")
-        return 
+    def _glGenVertexArrays(self,n,ids):
+        for i in range(n):
+            buffer=  {'arr': [], 'type': 'vao'}
+            idx = self.GL.getNewId(self.GL.vaos)
+            buffer['name'] = idx
+            self.GL.vaos[idx] = buffer
+            self.HEAP32[(ids + i * 4) >> 2] = idx
+    
     
     @logwrap
     def _glGenerateMipmap(self,param0):
-        logging.error("_glGenerateMipmap not implemented")
         return 
     
     @logwrap
@@ -2507,10 +2544,29 @@ class wasm_base:
         self.emscriptenWebGLGet(name_, p, "Integer")
     
     @logwrap
-    def _glGetInternalformativ(self,param0,param1,param2,param3,param4):
-        logging.error("_glGetInternalformativ not implemented")
-        return 
-    
+    def _glGetInternalformativ(self,target, internalformat, pname, bufSize, params):
+        if (bufSize < 0):
+            self.GL.lastError = 1281
+            return
+        
+        samples = self.GL.ctx_getInternalformatParameter(target, internalformat, 32937)
+        if samples is None:
+            self.GL.lastError = 1280
+            return
+        
+        if pname == 32937:
+            n = min(bufSize, len(samples))
+            for i in range(n):
+                self.HEAP32[params + i * 4 >> 2] = samples[i]
+            
+        elif pname == 37760:
+            if (bufSize > 1):
+                self.HEAP32[params >> 2] = len(samples)
+
+        else:
+            self.GL.lastError = 1280
+            return
+
     @logwrap
     def _glGetProgramBinary(self,param0,param1,param2,param3,param4):
         logging.error("_glGetProgramBinary not implemented")
@@ -2553,16 +2609,16 @@ class wasm_base:
     
     @logwrap
     def _glGetString(self,name_):
-        if name_ in self.GL_stringCache:
-            return self.GL_stringCache[name_]
+        if name_ in self.GL.stringCache:
+            return self.GL.stringCache[name_]
         
         if name_ in [7936, 7937, 37445, 37446]:
-            arr = self.intArrayFromString(self.GLctx_getParameter.get(name_))
+            arr = self.intArrayFromString(self.GL.ctx_getParameter(name_))
             ret = self.allocate(arr, "i8", self.ALLOC_NORMAL)
 
         elif name_ == 7938:
             # Get OpenGL version
-            glVersion = self.GLctx_getParameter.get(self.GLctx_VERSION)
+            glVersion = self.GL.ctx_getParameter(self.GLctx_VERSION)
             glVersion = "OpenGL ES 3.0 (" + glVersion + ")"
             ret = self.allocate(self.intArrayFromString(glVersion), "i8", self.ALLOC_NORMAL)
 
@@ -2578,7 +2634,8 @@ class wasm_base:
 
         elif name_ == 35724:
             # Get GLSL version
-            glslVersion = self.GLctx_getParameter.get(self.GLctx_SHADING_LANGUAGE_VERSION)
+            glslVersion = self.GL.ctx_getParameter(self.GLctx_SHADING_LANGUAGE_VERSION)
+            assert(glslVersion is not None)
             ver_re = r"^WebGL GLSL ES ([0-9]\.[0-9][0-9]?)(?:$| .*)"
             ver_num = re.match(ver_re, glslVersion)
             if ver_num:
@@ -2587,23 +2644,56 @@ class wasm_base:
                     ver_num = ver_num + "0"
                 glslVersion = "OpenGL ES GLSL ES " + ver_num + " (" + glslVersion + ")"
             arr = self.intArrayFromString(glslVersion)
-            ret = self.allocate(arr, "i8", "ALLOC_NORMAL")
+            ret = self.allocate(arr, "i8", self.ALLOC_NORMAL)
 
         else:
-            self.GL_lasterror = 1280
+            self.GL.lastError = 1280
             return 0
-        self.GL_stringCache[name_] = ret
+        self.GL.stringCache[name_] = ret
         return ret
     
     @logwrap
-    def _glGetStringi(self,param0,param1):
-        logging.error("_glGetStringi not implemented")
+    def _glGetStringi(self, name, index):
+        stringiCache = self.GL.stringiCache.get(name)
+        
+        if stringiCache:
+            if index < 0 or index >= len(stringiCache):
+                self.GL.lastError = 1281
+                return 0
+            return stringiCache[index]
+
+        if name == 7939:
+            exts = self.GLctx_getSupportedExtensions
+            gl_exts = []
+            for ext in exts:
+                # Allocate both raw and prefixed extension names
+                arr = self.intArrayFromString(ext)
+                ret = self.allocate(arr, "i8", self.ALLOC_NORMAL)
+                gl_exts.append(ret)
+
+                arr = self.intArrayFromString("GL_" + ext)
+                ret = self.allocate(arr, "i8", self.ALLOC_NORMAL)
+                gl_exts.append(ret)
+            
+            self.GL.stringiCache[name] = gl_exts
+            stringiCache = gl_exts
+
+            if index < 0 or index >= len(stringiCache):
+                self.GL.lastError = 1281
+                return 0
+            return stringiCache[index]
+
+        # Handle unsupported name values
+        self.GL.lastError = 1280
         return 0
     
     @logwrap
-    def _glGetTexParameteriv(self,param0,param1,param2):
-        logging.error("_glGetTexParameteriv not implemented")
-        return 
+    def _glGetTexParameteriv(self,target, pname, params):
+        if not params:
+            self.GL.lastError = 1281
+            return 
+        
+        self.HEAP32[params >> 2] = self.GL.ctx_getTexParameter(target, pname)
     
     @logwrap
     def _glGetUniformBlockIndex(self,param0,param1):
@@ -2656,13 +2746,16 @@ class wasm_base:
         return 0
     
     @logwrap
-    def _glPixelStorei(self,param0,param1):
-        logging.error("_glPixelStorei not implemented")
+    def _glPixelStorei(self,pname,param):
+        if (pname == 3333):
+            self.GL.packAlignment = param
+        if (pname == 3317):
+            self.GL.unpackAlignment = param
         return 
     
     @logwrap
     def _glPolygonOffset(self,param0,param1):
-        logging.error("_glPolygonOffset not implemented")
+        logging.warning("_glPolygonOffset not implemented -- ignored")
         return 
     
     @logwrap
@@ -2712,67 +2805,66 @@ class wasm_base:
     
     @logwrap
     def _glStencilFuncSeparate(self,param0,param1,param2,param3):
-        logging.error("_glStencilFuncSeparate not implemented")
+        logging.warning("_glStencilFuncSeparate not implemented -- ignored")
         return 
     
     @logwrap
     def _glStencilMask(self,param0):
-        logging.error("_glStencilMask not implemented")
+        logging.warning("_glStencilMask not implemented -- ignored")
         return 
     
     @logwrap
     def _glStencilOpSeparate(self,param0,param1,param2,param3):
-        logging.error("_glStencilOpSeparate not implemented")
+        logging.warning("_glStencilOpSeparate not implemented -- ignored")
         return 
     
     @logwrap
     def _glTexImage2D(self,param0,param1,param2,param3,param4,param5,param6,param7,param8):
-        logging.error("_glTexImage2D not implemented")
+        logging.warning("_glTexImage2D not implemented -- ignored")
         return 
     
     @logwrap
     def _glTexImage3D(self,param0,param1,param2,param3,param4,param5,param6,param7,param8,param9):
-        logging.error("_glTexImage3D not implemented")
+        logging.warning("_glTexImage3D not implemented -- ignored")
         return 
     
     @logwrap
     def _glTexParameterf(self,param0,param1,param2):
-        logging.error("_glTexParameterf not implemented")
+        self.GL.ctx_setTexParameter(param0, param1, param2)
         return 
     
     @logwrap
     def _glTexParameteri(self,param0,param1,param2):
-        logging.error("_glTexParameteri not implemented")
-        return 
+        self.GL.ctx_setTexParameter(param0, param1, param2)
     
     @logwrap
-    def _glTexParameteriv(self,param0,param1,param2):
-        logging.error("_glTexParameteriv not implemented")
-        return 
+    def _glTexParameteriv(self,target, pname, params):
+        param = self.HEAP32[params >> 2];
+        self.GL.ctx_setTexParameter(target, pname, param)
     
     @logwrap
     def _glTexStorage2D(self,param0,param1,param2,param3,param4):
-        logging.error("_glTexStorage2D not implemented")
+        logging.warning("_glTexStorage2D not implemented -- ignored")
         return 
     
     @logwrap
     def _glTexStorage3D(self,param0,param1,param2,param3,param4,param5):
-        logging.error("_glTexStorage3D not implemented")
+        logging.warning("_glTexStorage3D not implemented -- ignored")
         return 
     
     @logwrap
     def _glTexSubImage2D(self,param0,param1,param2,param3,param4,param5,param6,param7,param8):
-        logging.error("_glTexSubImage2D not implemented")
+        logging.warning("_glTexSubImage2D not implemented -- ignored")
         return 
     
     @logwrap
     def _glTexSubImage3D(self,param0,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10):
-        logging.error("_glTexSubImage3D not implemented")
+        logging.warning("_glTexSubImage3D not implemented -- ignored")
         return 
     
     @logwrap
     def _glTransformFeedbackVaryings(self,param0,param1,param2,param3):
-        logging.error("_glTransformFeedbackVaryings not implemented")
+        logging.warning("_glTransformFeedbackVaryings not implemented -- ignored")
         return 
     
     @logwrap
@@ -2862,7 +2954,7 @@ class wasm_base:
     
     @logwrap
     def _glUseProgram(self,param0):
-        logging.error("_glUseProgram not implemented")
+        logging.warning("_glUseProgram not implemented -- ignored")
         return 
     
     @logwrap
@@ -2912,12 +3004,11 @@ class wasm_base:
     
     @logwrap
     def _llvm_exp2_f32(self,param0):
-        logging.error("_llvm_exp2_f32 not implemented")
-        return 0
+        return math.pow(2, param0)
     
     @logwrap
     def _llvm_log10_f32(self,param0):
-        logging.error("_llvm_log10_f32 not implemented")
+        return math.log(param0) / math.log(10)
         return 0
     
     @logwrap
@@ -2927,8 +3018,7 @@ class wasm_base:
     
     @logwrap
     def _llvm_log2_f32(self,param0):
-        logging.error("_llvm_log2_f32 not implemented")
-        return 0
+        return math.log(param0) / math.log(2)
     
     @logwrap
     def _llvm_trap(self):
@@ -3282,7 +3372,7 @@ class wasm_base:
 
     def emscriptenWebGLGet(self, name_, p, type):
         if not p:
-            self.GL_lasterror = 1281
+            self.GL.lastError = 1281
             return
 
         ret = None
@@ -3290,12 +3380,12 @@ class wasm_base:
             ret = 1
         elif name_ == 36344:
             if type not in ["Integer", "Integer64"]:
-                self.GL_lasterror = 1280
+                self.GL.lastError = 1280
                 return
         elif name_ in [34814, 36345]:
             ret = 0
         elif name_ == 34466:
-            formats = self.GLctx_getParameter.get(34467)
+            formats = self.GL.ctx_getParameter(34467)
             ret = len(formats)
         elif name_ == 33309:
             exts = self.GLctx_getSupportedExtensions
@@ -3304,14 +3394,15 @@ class wasm_base:
             ret = 3 if name_ == 33307 else 0
 
         if ret is None:
-            result = self.GLctx_getParameter.get(name_)
+            result = self.GL.ctx_getParameter(name_)
             if isinstance(result, (int, float, bool)):
                 ret = int(result) if isinstance(result, bool) else result
             elif result is None:
                 if name_ in [34964, 35725, 34965, 36006, 36007, 32873, 34229, 35097, 36389, 34068]:
                     ret = 0
                 else:
-                    self.GL_lasterror = 1280
+                    self.GL.lastError = 1280
+                    logging.error("emscriptenWebGLGet missing %s" % name_ )
                     return
             elif isinstance(result, (list, np.array)):
                 for i in range(len(result)):
@@ -3328,7 +3419,7 @@ class wasm_base:
             # elif isinstance(result, (WebGLBuffer, WebGLProgram, WebGLFramebuffer, WebGLRenderbuffer, WebGLQuery, WebGLSampler, WebGLSync, WebGLTransformFeedback, WebGLVertexArrayObject, WebGLTexture)):
             #     ret = int(result.name)
             else:
-                self.GL_lasterror = 1280
+                self.GL.lastError = 1280
                 logging.error('Unhandled error in emscriptenWebGLGet')
                 return
 
@@ -3348,9 +3439,9 @@ class wasm_base:
     def log(self, param0):
         return
         out = {}
-        for idx in HEAP32_DEBUG_FULL:
+        for idx in HEAP32_DEBUG:
             out[idx] =  self.HEAP32[idx//4]
-        logging.info(f"from custom log: {param0} ||| {dict(sorted(out.items()))}"  )
+        logging.info(f"from custom log: {param0} ||| {out.items()}"  )
         return
 
     def log2(self, funcname, placeholder, logval):
@@ -3362,7 +3453,7 @@ class wasm_base:
             return self.log2(funcname, placeholder, logval)
         
         if funcname in self.func_stack:
-            if placeholder in self.func_stack[funcname] and placeholder not in HEAP32_DEBUG_FULL:
+            if placeholder in self.func_stack[funcname] and placeholder not in HEAP32_DEBUG:
                 log_wasm(funcname ,self.func_stack[funcname])
                 self.func_stack.pop(funcname)
                 return self.log2(funcname, placeholder, logval)
@@ -3371,7 +3462,7 @@ class wasm_base:
         else:
             self.func_stack[funcname] = {}
             self.func_stack[funcname][placeholder] = logval
-            for idx in HEAP32_DEBUG_FULL:
+            for idx in HEAP32_DEBUG:
                 self.func_stack[funcname][idx] =  self.HEAP32[idx//4]
             
 

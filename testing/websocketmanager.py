@@ -301,5 +301,168 @@ ASM_CONSTS = [
     lambda: logging.error('ASM_CONSTS3 not defined')
 ]
 
+class CANVAS:
+    canvasSharedPtr =  None
+    offscreenCanvas =  None 
+    controlTransferredOffscreen =  None
+    width = 300
+    height = 150 
+
+class GL:
+    def __init__(self):
+        self.lastError = 0
+        self.stringCache = {}
+        self.stringiCache = {}
+
+        self.contexts = []
+        self.buffers = []
+        self.programs = []
+        self.shaders = []
+        self.queries = []
+        self.samplers = []
+        self.textures = []
+        self.framebuffers = []
+        self.renderbuffers = []
+        self.transformfeedbacks = []
+        self.vaos = []
+        self.syncs = []
+
+        self.currentContext = None
+        self.contexts_ext  = {
+            'WEBGL_compressed_texture_s3tc_srgb' : 'WebGLCompressedTextureS3TCsRGB',
+            'EXT_color_buffer_float' : 'EXTColorBufferFloat',
+            }
+        self.byteSizeByTypeRoot=  5120
+        self.byteSizeByType = [1, 1, 2, 2, 4, 4, 4, 2, 3, 4, 8]
+        self.packAlignment = 4
+        self.unpackAlignment = 4
+        self.counter = 1
+
+        self.text_param = {}
+
+    def ctx_getParameter(self, k):
+        
+        ref = {
+            3379: 16384,
+            7936: 'WebKit',
+            7937: 'WebKit WebGL',
+            7938: 'WebGL 2.0 (OpenGL ES 3.0 Chromium)',
+            35724: 'WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)',
+            34467: np.array([33776, 33777, 33778, 33779, 35916, 35917, 35918, 35919], dtype=np.uint32),
+            34016: 33984,
+            36183: 16,
+            35661: 32,
+            35660: 16,
+            34076: 16384,
+            35071: 2048,
+            34047: 16,
+            36063: 8,
+            34024: 16384,
+            35658: 16384,
+            35376: 65536,
+            35375: 24,
+            35380: 256,
+            34921: 16,
+            3410: 8,
+            3411: 8,
+            3412: 8,
+            3413: 8,
+            3414: 24,
+            3415: 8,
+            32937: 0,
+            32936: 0,
+        }
+
+        if k not in ref:
+            logging.error('ctx_getParameter %s not found' % k)
+        ret = ref.get(k)
+        if ret is None:
+            logging.warning(f'ctx_getParameter {k} is None')
+            
+        return ret
+
+    def ctx_getInternalformatParameter(self, *args):
+        ref = {
+            (36161, 35907, 32937): np.array([16,  8,  4,  2,  1], dtype=np.uint32), 
+            (36161, 33321, 32937): np.array([16,  8,  4,  2,  1], dtype=np.uint32), 
+            (36161, 33323, 32937): np.array([16,  8,  4,  2,  1], dtype=np.uint32), 
+            (36161, 32849, 32937): np.array([16,  8,  4,  2,  1], dtype=np.uint32), 
+            (36161, 32856, 32937): np.array([16,  8,  4,  2,  1], dtype=np.uint32), 
+            (36161, 36756, 32937): None, 
+            (36161, 36757, 32937): None, 
+            (36161, 36759, 32937): None, 
+            (36161, 33330, 32937): np.array([], dtype=np.uint32), 
+            (36161, 33336, 32937): np.array([], dtype=np.uint32), 
+            (36161, 36220, 32937): np.array([], dtype=np.uint32), 
+            (36161, 33329, 32937): np.array([], dtype=np.uint32), 
+            (36161, 33335, 32937): np.array([], dtype=np.uint32), 
+            (36161, 36238, 32937): np.array([], dtype=np.uint32), 
+            (36161, 33322, 32937): np.array([16,  8,  4,  2,  1], dtype=np.uint32), 
+            (36161, 33324, 32937): np.array([16,  8,  4,  2,  1], dtype=np.uint32), 
+            (36161, 32859, 32937): np.array([16,  8,  4,  2,  1], dtype=np.uint32), 
+            (36161, 36760, 32937): None, 
+            (36161, 36761, 32937): None, 
+            (36161, 36763, 32937): None, 
+            (36161, 33332, 32937): np.array([], dtype=np.uint32), 
+            (36161, 33338, 32937): np.array([], dtype=np.uint32), 
+            (36161, 36214, 32937): np.array([], dtype=np.uint32), 
+            (36161, 33331, 32937): np.array([], dtype=np.uint32), 
+            (36161, 33337, 32937): np.array([], dtype=np.uint32), 
+            (36161, 36232, 32937): np.array([], dtype=np.uint32), 
+            (36161, 33334, 32937): np.array([], dtype=np.uint32), 
+            (36161, 33340, 32937): np.array([], dtype=np.uint32), 
+            (36161, 36208, 32937): np.array([], dtype=np.uint32), 
+            (36161, 33333, 32937): np.array([], dtype=np.uint32), 
+            (36161, 33339, 32937): np.array([], dtype=np.uint32), 
+            (36161, 36226, 32937): np.array([], dtype=np.uint32), 
+            (36161, 33325, 32937): np.array([16,  8,  4,  2,  1], dtype=np.uint32), 
+            (36161, 33327, 32937): np.array([16,  8,  4,  2,  1], dtype=np.uint32), 
+            (36161, 34842, 32937): np.array([16,  8,  4,  2,  1], dtype=np.uint32), 
+            (36161, 33326, 32937): np.array([16,  8,  4,  2,  1], dtype=np.uint32), 
+            (36161, 33328, 32937): np.array([16,  8,  4,  2,  1], dtype=np.uint32), 
+            (36161, 34836, 32937): np.array([16,  8,  4,  2,  1], dtype=np.uint32), 
+            (36161, 32854, 32937): np.array([16,  8,  4,  2,  1], dtype=np.uint32), 
+            (36161, 36194, 32937): np.array([16,  8,  4,  2,  1], dtype=np.uint32), 
+            (36161, 32855, 32937): np.array([16,  8,  4,  2,  1], dtype=np.uint32), 
+            (36161, 35898, 32937): np.array([16,  8,  4,  2,  1], dtype=np.uint32), 
+            (36161, 32857, 32937): np.array([16,  8,  4,  2,  1], dtype=np.uint32), 
+            (36161, 33189, 32937): np.array([16,  8,  4,  2,  1], dtype=np.uint32), 
+            (36161, 33190, 32937): np.array([16,  8,  4,  2,  1], dtype=np.uint32), 
+            (36161, 35056, 32937): np.array([16,  8,  4,  2,  1], dtype=np.uint32), 
+            (36161, 36012, 32937): np.array([16,  8,  4,  2,  1], dtype=np.uint32), 
+            (36161, 36013, 32937): np.array([16,  8,  4,  2,  1], dtype=np.uint32), 
+            (36161, 36168, 32937): np.array([16,  8,  4,  2,  1], dtype=np.uint32)}
+
+        if not args in ref:
+            logging.error(f'ctx_getInternalformatParameter {args} not found')
+        
+        ret = ref.get(args)
+        if ret is None:
+            logging.warning(f'ctx_getInternalformatParameter {args} is None')
+            
+        return ret
+    
+
+    def ctx_setTexParameter(self, target, pname, params):
+        self.text_param[(target, pname)] = params
+    
+    def ctx_getTexParameter(self, *args):
+        if not args in self.text_param:
+            logging.error(f'ctx_getTexParameter {args} not found')
+        
+        ret = self.text_param.get(args, 0)
+        return ret
+    
+    def getNewId(self, table: list):
+        ret = self.counter
+        self.counter +=1
+        for _ in range( len(table), ret):
+            table.append(None)
+        
+        #append one more to create that length
+        table.append(None)
+        logging.info('getNewId: %s' % ret)
+        return ret
+
 if __name__ == '__main__':
-    print(ASM_CONSTS[1]())
+    print(bool(CANVAS.controlTransferredOffscreen))

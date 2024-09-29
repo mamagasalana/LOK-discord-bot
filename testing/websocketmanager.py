@@ -75,7 +75,8 @@ IDBFS = NODEFS = WORKERFS = MEMFS
 
 class FS(io.FileIO):
     def __init__(self, fd, path, tty=False):
-        super().__init__(fd)
+        super().__init__(fd, mode='r+b')
+        self.fd = fd
         self.path = path
         if tty:
             self.tty = {'input': [], 'output': []}
@@ -88,6 +89,10 @@ class FS(io.FileIO):
         size = len(contents)
         buffer[offset:offset + size] = contents_np
         return size
+    
+    def write_contents(self, buffer, offset, length):
+        self.write(buffer[offset: offset+length])
+        return self.tell()
         
     def write_to_buffer(self, buffer, offset, length):
         for i in range(length):
@@ -464,5 +469,20 @@ class GL:
         logging.info('getNewId: %s' % ret)
         return ret
 
+class JSException(Exception):
+    def __init__(self, ptr, ex_type, destructor):
+        super().__init__(f'throw {ptr}')
+        self.ptr = ptr
+        self.adjusted = ptr
+        self.type = ex_type
+        self.destructor = destructor
+        self.refcount = 0
+        self.caught = False
+        self.rethrown = False
+
 if __name__ == '__main__':
-    print(bool(CANVAS.controlTransferredOffscreen))
+    # print(bool(CANVAS.controlTransferredOffscreen))
+    try:
+        raise JSException(1,2,3)
+    except Exception as e:
+        print(str(e))

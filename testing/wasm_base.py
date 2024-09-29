@@ -13,7 +13,7 @@ import math
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'testing')))
 
-from websocketmanager import customWebSocket, JSSYS,ERRNO_CODES, FS, ASM_CONSTS, UTF8ArrayToString, CANVAS, GL
+from websocketmanager import customWebSocket, JSSYS,ERRNO_CODES, FS, ASM_CONSTS, UTF8ArrayToString, CANVAS, GL, JSException
 
 # HEAP32_DEBUG= [5914000, 5913988, 5913980, 5913984, 5914448, 5914456] 
 # HEAP32_DEBUG_FULL = HEAP32_DEBUG + [5914000,  5202024, 5949232, 5084484, 5913996, 5949244, 5271560, 5271564, 5271108, 18729848, 18730008, ]
@@ -42,26 +42,36 @@ def logwrap(func):
         try:
             ret =  func(self, *args, **kwargs)
         except Exception as e:
-            logging.error(f"'{func.__name__}' failed", exc_info=True)
+            if isinstance(e, JSException):
+                logging.error(f"'{func.__name__}' failed")
+            else:    
+                logging.error(f"'{func.__name__}' failed", exc_info=True)
             raise e
         
         log_msg += f" ||| return {ret}"
+        debug=False
+        if not 'invoke' in func.__name__ and not func.__name__ in ['_atomic_fetch_add_8', 'getTotalMemory']:
+            debug=True
 
-        if HEAP64_DEBUG:
+        if HEAP64_DEBUG and debug:
             out = {x: self.HEAP64[x//8] for x in HEAP64_DEBUG}
             log_msg += f" ||| {out}"
 
-        if HEAP32_DEBUG:
+        if HEAP32_DEBUG  and debug:
             out = {x: self.HEAP32[x//4] for x in HEAP32_DEBUG}
             log_msg += f" ||| {out}"
 
-        logging.info(log_msg)
+        # if not 'invoke' in func.__name__ and not func.__name__ in ['_atomic_fetch_add_8', 'getTotalMemory']:
+        if debug:
+            logging.info(log_msg)
         return ret
     
     return wrapper
 
 class wasm_base:
     def __init__(self):
+        self.START_DEBUG=True
+
         self.ENV = {}
         self.GETENV_RET = {}
         self.PAGE_SIZE = 16384;
@@ -111,6 +121,10 @@ class wasm_base:
         self.canvas = CANVAS()
         self.GL = GL()
 
+        self.EXCEPTIONS_infos ={}
+        self.EXCEPTIONS_caught = []
+
+        self._cxa_find_matching_catch_buffer = None
     @logwrap
     def abort(self,param0):
         logging.error("abort not implemented")
@@ -147,356 +161,601 @@ class wasm_base:
         return 0
     
     @logwrap
-    def invoke_dddi(self,*args):
+    def invoke_dddi(self, *args):
         sp = self.stackSave()
         try:
             return self.dynCall_dddi(*args)
         except:
-            logging.error('invoke_i fail?', exc_info=True)
-            self.stackRestore()
+            logging.error('invoke_dddi fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 0
-    
+
     @logwrap
-    def invoke_dii(self,param0,param1,param2):
-        logging.error("invoke_dii not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_diii(self,param0,param1,param2,param3):
-        logging.error("invoke_diii not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_diiid(self,param0,param1,param2,param3,param4):
-        logging.error("invoke_diiid not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_diiii(self,param0,param1,param2,param3,param4):
-        logging.error("invoke_diiii not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_ffffi(self,param0,param1,param2,param3,param4):
-        logging.error("invoke_ffffi not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_fffi(self,param0,param1,param2,param3):
-        logging.error("invoke_fffi not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_fi(self,param0,param1):
-        logging.error("invoke_fi not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_fii(self,param0,param1,param2):
-        logging.error("invoke_fii not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_fiifi(self,param0,param1,param2,param3,param4):
-        logging.error("invoke_fiifi not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_fiifii(self,param0,param1,param2,param3,param4,param5):
-        logging.error("invoke_fiifii not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_fiii(self,param0,param1,param2,param3):
-        logging.error("invoke_fiii not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_fiiif(self,param0,param1,param2,param3,param4):
-        logging.error("invoke_fiiif not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_fiiii(self,param0,param1,param2,param3,param4):
-        logging.error("invoke_fiiii not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_i(self,param0):
+    def invoke_dii(self, *args):
         sp = self.stackSave()
         try:
-            return self.dynCall_i(param0)
+            return self.dynCall_dii(*args)
+        except:
+            logging.error('invoke_dii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_diii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_diii(*args)
+        except:
+            logging.error('invoke_diii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_diiid(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_diiid(*args)
+        except:
+            logging.error('invoke_diiid fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_diiii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_diiii(*args)
+        except:
+            logging.error('invoke_diiii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_ffffi(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_ffffi(*args)
+        except:
+            logging.error('invoke_ffffi fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_fffi(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_fffi(*args)
+        except:
+            logging.error('invoke_fffi fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_fi(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_fi(*args)
+        except:
+            logging.error('invoke_fi fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_fii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_fii(*args)
+        except:
+            logging.error('invoke_fii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_fiifi(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_fiifi(*args)
+        except:
+            logging.error('invoke_fiifi fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_fiifii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_fiifii(*args)
+        except:
+            logging.error('invoke_fiifii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_fiii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_fiii(*args)
+        except:
+            logging.error('invoke_fiii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_fiiif(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_fiiif(*args)
+        except:
+            logging.error('invoke_fiiif fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_fiiii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_fiiii(*args)
+        except:
+            logging.error('invoke_fiiii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_i(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_i(*args)
         except:
             logging.error('invoke_i fail?', exc_info=True)
-            self.stackRestore()
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 0
-    
+
     @logwrap
-    def invoke_ifi(self,param0,param1,param2):
-        logging.error("invoke_ifi not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_ii(self,param0,param1):
+    def invoke_ifi(self, *args):
         sp = self.stackSave()
         try:
-            return self.dynCall_ii(param0, param1)
+            return self.dynCall_ifi(*args)
+        except:
+            logging.error('invoke_ifi fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_ii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_ii(*args)
         except:
             logging.error('invoke_ii fail?', exc_info=True)
-            self.stackRestore()
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 0
-    
+
     @logwrap
-    def invoke_iifii(self,param0,param1,param2,param3,param4):
-        logging.error("invoke_iifii not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_iii(self,param0,param1,param2):
+    def invoke_iifii(self, *args):
         sp = self.stackSave()
         try:
-            return self.dynCall_iii(param0, param1,param2)
+            return self.dynCall_iifii(*args)
+        except:
+            logging.error('invoke_iifii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+
+    
+    @logwrap
+    def invoke_iii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_iii(*args)
         except:
             logging.error('invoke_iii fail?', exc_info=True)
-            self.stackRestore()
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 0
-    
+
     @logwrap
-    def invoke_iiifi(self,param0,param1,param2,param3,param4):
-        logging.error("invoke_iiifi not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_iiii(self,param0,param1,param2,param3):
+    def invoke_iiifi(self, *args):
         sp = self.stackSave()
         try:
-            return self.dynCall_iiii(param0, param1,param2, param3)
+            return self.dynCall_iiifi(*args)
+        except:
+            logging.error('invoke_iiifi fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_iiii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_iiii(*args)
         except:
             logging.error('invoke_iiii fail?', exc_info=True)
-            self.stackRestore()
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 0
-    
+
     @logwrap
-    def invoke_iiiifii(self,param0,param1,param2,param3,param4,param5,param6):
-        logging.error("invoke_iiiifii not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_iiiii(self,param0,param1,param2,param3,param4):
+    def invoke_iiiifii(self, *args):
         sp = self.stackSave()
         try:
-            return self.dynCall_iiiii(param0,param1,param2,param3,param4)
+            return self.dynCall_iiiifii(*args)
+        except:
+            logging.error('invoke_iiiifii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_iiiii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_iiiii(*args)
         except:
             logging.error('invoke_iiiii fail?', exc_info=True)
-            self.stackRestore()
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 0
-    
+
     @logwrap
-    def invoke_iiiiii(self,param0,param1,param2,param3,param4,param5):
+    def invoke_iiiiii(self, *args):
         sp = self.stackSave()
         try:
-            return self.dynCall_iiiiii(param0,param1,param2,param3,param4,param5)
+            return self.dynCall_iiiiii(*args)
         except:
             logging.error('invoke_iiiiii fail?', exc_info=True)
-            self.stackRestore()
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 0
-    
-    
+
     @logwrap
-    def invoke_iiiiiii(self,param0,param1,param2,param3,param4,param5,param6):
+    def invoke_iiiiiii(self, *args):
         sp = self.stackSave()
         try:
-            return self.dynCall_iiiiiii(param0,param1,param2,param3,param4,param5,param6)
+            return self.dynCall_iiiiiii(*args)
         except:
             logging.error('invoke_iiiiiii fail?', exc_info=True)
-            self.stackRestore()
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 0
-    
+
     @logwrap
-    def invoke_iiiiiiii(self,param0,param1,param2,param3,param4,param5,param6,param7):
+    def invoke_iiiiiiii(self, *args):
         sp = self.stackSave()
         try:
-            return self.dynCall_iiiiiiii(param0,param1,param2,param3,param4,param5,param6,param7)
+            return self.dynCall_iiiiiiii(*args)
         except:
             logging.error('invoke_iiiiiiii fail?', exc_info=True)
-            self.stackRestore()
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 0
-    
+
     @logwrap
-    def invoke_iiiiiiiii(self,param0,param1,param2,param3,param4,param5,param6,param7,param8):
-        logging.error("invoke_iiiiiiiii not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_iiiiiiiiii(self,param0,param1,param2,param3,param4,param5,param6,param7,param8,param9):
-        logging.error("invoke_iiiiiiiiii not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_iiiiiiiiiii(self,param0,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10):
-        logging.error("invoke_iiiiiiiiiii not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_v(self,param0):
+    def invoke_iiiiiiiii(self, *args):
         sp = self.stackSave()
         try:
-            self.dynCall_v(param0)
+            return self.dynCall_iiiiiiiii(*args)
+        except:
+            logging.error('invoke_iiiiiiiii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_iiiiiiiiii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_iiiiiiiiii(*args)
+        except:
+            logging.error('invoke_iiiiiiiiii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_iiiiiiiiiii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_iiiiiiiiiii(*args)
+        except:
+            logging.error('invoke_iiiiiiiiiii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_v(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_v(*args)
         except:
             logging.error('invoke_v fail?', exc_info=True)
-            self.stackRestore()
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 
-    
+
     @logwrap
-    def invoke_vi(self,param0,param1):
+    def invoke_vi(self, *args):
         sp = self.stackSave()
         try:
-            self.dynCall_vi(param0, param1)
+            return self.dynCall_vi(*args)
         except:
             logging.error('invoke_vi fail?', exc_info=True)
-            self.stackRestore()
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 
-    
-    @logwrap
-    def invoke_vidiii(self,param0,param1,param2,param3,param4,param5):
-        logging.error("invoke_vidiii not implemented")
-        return 
-    
-    @logwrap
-    def invoke_vifffi(self,param0,param1,param2,param3,param4,param5):
-        logging.error("invoke_vifffi not implemented")
-        return 
-    
-    @logwrap
-    def invoke_vifi(self,param0,param1,param2,param3):
-        logging.error("invoke_vifi not implemented")
-        return 
-    
-    @logwrap
-    def invoke_vifii(self,param0,param1,param2,param3,param4):
-        logging.error("invoke_vifii not implemented")
-        return 
-    
-    @logwrap
-    def invoke_vii(self,param0,param1,param2):
-        sp = self.stackSave()
 
+    @logwrap
+    def invoke_vidiii(self, *args):
+        sp = self.stackSave()
         try:
-            self.dynCall_vii(param0, param1, param2)
+            return self.dynCall_vidiii(*args)
+        except:
+            logging.error('invoke_vidiii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 
+
+    @logwrap
+    def invoke_vifffi(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_vifffi(*args)
+        except:
+            logging.error('invoke_vifffi fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 
+
+    @logwrap
+    def invoke_vifi(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_vifi(*args)
+        except:
+            logging.error('invoke_vifi fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 
+
+    @logwrap
+    def invoke_vifii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_vifii(*args)
+        except:
+            logging.error('invoke_vifii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 
+
+    @logwrap
+    def invoke_vii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_vii(*args)
         except:
             logging.error('invoke_vii fail?', exc_info=True)
-            self.stackRestore()
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 
-    
+
     @logwrap
-    def invoke_viidi(self,param0,param1,param2,param3,param4):
-        logging.error("invoke_viidi not implemented")
-        return 
-    
-    @logwrap
-    def invoke_viidii(self,param0,param1,param2,param3,param4,param5):
-        logging.error("invoke_viidii not implemented")
-        return 
-    
-    @logwrap
-    def invoke_viiff(self,param0,param1,param2,param3,param4):
-        logging.error("invoke_viiff not implemented")
-        return 
-    
-    @logwrap
-    def invoke_viiffi(self,param0,param1,param2,param3,param4,param5):
-        logging.error("invoke_viiffi not implemented")
-        return 
-    
-    @logwrap
-    def invoke_viifi(self,param0,param1,param2,param3,param4):
-        logging.error("invoke_viifi not implemented")
-        return 
-    
-    @logwrap
-    def invoke_viifii(self,param0,param1,param2,param3,param4,param5):
-        logging.error("invoke_viifii not implemented")
-        return 
-    
-    @logwrap
-    def invoke_viii(self,param0,param1,param2,param3):
+    def invoke_viidi(self, *args):
         sp = self.stackSave()
         try:
-            self.dynCall_viii(param0, param1, param2,param3)
+            return self.dynCall_viidi(*args)
+        except:
+            logging.error('invoke_viidi fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 
+
+    @logwrap
+    def invoke_viidii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_viidii(*args)
+        except:
+            logging.error('invoke_viidii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 
+
+    @logwrap
+    def invoke_viiff(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_viiff(*args)
+        except:
+            logging.error('invoke_viiff fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 
+
+    @logwrap
+    def invoke_viiffi(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_viiffi(*args)
+        except:
+            logging.error('invoke_viiffi fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 
+
+    @logwrap
+    def invoke_viifi(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_viifi(*args)
+        except:
+            logging.error('invoke_viifi fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 
+
+    @logwrap
+    def invoke_viifii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_viifii(*args)
+        except:
+            logging.error('invoke_viifii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 
+
+    @logwrap
+    def invoke_viii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_viii(*args)
         except:
             logging.error('invoke_viii fail?', exc_info=True)
-            self.stackRestore()
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 
-    
+
     @logwrap
-    def invoke_viiif(self,param0,param1,param2,param3,param4):
-        logging.error("invoke_viiif not implemented")
-        return 
-    
-    @logwrap
-    def invoke_viiii(self,param0,param1,param2,param3,param4):
+    def invoke_viiif(self, *args):
         sp = self.stackSave()
         try:
-            self.dynCall_viiii(param0, param1, param2,param3,param4)
+            return self.dynCall_viiif(*args)
+        except:
+            logging.error('invoke_viiif fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 
+
+    @logwrap
+    def invoke_viiii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_viiii(*args)
         except:
             logging.error('invoke_viiii fail?', exc_info=True)
-            self.stackRestore()
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 
-    
+
     @logwrap
-    def invoke_viiiii(self,param0,param1,param2,param3,param4,param5):
+    def invoke_viiiii(self, *args):
         sp = self.stackSave()
         try:
-            self.dynCall_viiiii(param0, param1, param2,param3,param4, param5)
+            return self.dynCall_viiiii(*args)
         except:
             logging.error('invoke_viiiii fail?', exc_info=True)
-            self.stackRestore()
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 
-    
-    @logwrap    
-    def invoke_viiiiii(self,param0,param1,param2,param3,param4,param5,param6):
+
+    @logwrap
+    def invoke_viiiiii(self, *args):
         sp = self.stackSave()
         try:
-            self.dynCall_viiiiii(param0,param1,param2,param3,param4,param5,param6)
+            return self.dynCall_viiiiii(*args)
         except:
             logging.error('invoke_viiiiii fail?', exc_info=True)
-            self.stackRestore()
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 
-    
+
     @logwrap
-    def invoke_viiiiiii(self,param0,param1,param2,param3,param4,param5,param6,param7):
-        logging.error("invoke_viiiiiii not implemented")
+    def invoke_viiiiiii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_viiiiiii(*args)
+        except:
+            logging.error('invoke_viiiiiii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 
-    
+
     @logwrap
-    def invoke_viiiiiiifddfii(self,param0,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10,param11,param12,param13):
-        logging.error("invoke_viiiiiiifddfii not implemented")
+    def invoke_viiiiiiifddfii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_viiiiiiifddfii(*args)
+        except:
+            logging.error('invoke_viiiiiiifddfii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 
-    
+
     @logwrap
-    def invoke_viiiiiiiffffii(self,param0,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10,param11,param12,param13):
-        logging.error("invoke_viiiiiiiffffii not implemented")
+    def invoke_viiiiiiiffffii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_viiiiiiiffffii(*args)
+        except:
+            logging.error('invoke_viiiiiiiffffii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 
-    
+
     @logwrap
-    def invoke_viiiiiiifiifii(self,param0,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10,param11,param12,param13):
-        logging.error("invoke_viiiiiiifiifii not implemented")
+    def invoke_viiiiiiifiifii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_viiiiiiifiifii(*args)
+        except:
+            logging.error('invoke_viiiiiiifiifii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 
-    
+
     @logwrap
-    def invoke_viiiiiiii(self,param0,param1,param2,param3,param4,param5,param6,param7,param8):
-        logging.error("invoke_viiiiiiii not implemented")
+    def invoke_viiiiiiii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_viiiiiiii(*args)
+        except:
+            logging.error('invoke_viiiiiiii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 
-    
+
     @logwrap
-    def invoke_viiiiiiiii(self,param0,param1,param2,param3,param4,param5,param6,param7,param8,param9):
-        logging.error("invoke_viiiiiiiii not implemented")
+    def invoke_viiiiiiiii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_viiiiiiiii(*args)
+        except:
+            logging.error('invoke_viiiiiiiii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 
-    
+
     @logwrap
-    def invoke_viiiiiiiiii(self,param0,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10):
-        logging.error("invoke_viiiiiiiiii not implemented")
+    def invoke_viiiiiiiiii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_viiiiiiiiii(*args)
+        except:
+            logging.error('invoke_viiiiiiiiii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 
+
     
     @logwrap
     def _ES_AddEventHandler(self,param0,param1):
@@ -618,7 +877,7 @@ class wasm_base:
     
     @logwrap
     def _JS_Sound_Init(self):
-        logging.error("_JS_Sound_Init not implemented")
+        logging.warning("_JS_Sound_Init not implemented -- ignored")
         return 
     
     @logwrap
@@ -726,18 +985,22 @@ class wasm_base:
         return self.lengthBytesUTF8(gpuinfo)
     
     @logwrap
-    def _JS_SystemInfo_GetLanguage(self,param0,param1):
-        logging.error("_JS_SystemInfo_GetLanguage not implemented")
-        return 0
+    def _JS_SystemInfo_GetLanguage(self,buffer, bufferSize):
+        language = 'en-US'
+        if (buffer):
+            self.stringToUTF8(language, buffer, bufferSize);
+        return self.lengthBytesUTF8(language)
     
     @logwrap
     def _JS_SystemInfo_GetMemory(self):
         return self.TOTAL_MEMORY // (1024 * 1024)
     
     @logwrap
-    def _JS_SystemInfo_GetOS(self,param0,param1):
-        logging.error("_JS_SystemInfo_GetOS not implemented")
-        return 0
+    def _JS_SystemInfo_GetOS(self,buffer, bufferSize):
+        browser = 'Windows 10'
+        if (buffer):
+            self.stringToUTF8(browser, buffer, bufferSize)
+        return self.lengthBytesUTF8(browser)
     
     @logwrap
     def _JS_SystemInfo_GetPreferredDevicePixelRatio(self):
@@ -745,8 +1008,8 @@ class wasm_base:
     
     @logwrap
     def _JS_SystemInfo_GetScreenSize(self,param0,param1):
-        logging.error("_JS_SystemInfo_GetScreenSize not implemented")
-        return 
+        self.HEAPF64[param0 >> 3] = 1920
+        self.HEAPF64[param1 >> 3] = 1080
     
     @logwrap
     def _JS_SystemInfo_GetStreamingAssetsURL(self,param0,param1):
@@ -1184,38 +1447,84 @@ class wasm_base:
     
     @logwrap
     def _cxa_allocate_exception(self,param0):
-        logging.error("_cxa_allocate_exception not implemented")
-        return 0
+        return self._malloc(param0)
     
     @logwrap
-    def _cxa_begin_catch(self,param0):
-        logging.error("_cxa_begin_catch not implemented")
-        return 0
+    def _cxa_begin_catch(self,ptr):
+        info = self.EXCEPTIONS_infos[ptr]
+        if (info and  not info.caught):
+            info.caught = True
+        
+        if (info):
+            info.rethrown = False
+
+        self.EXCEPTIONS_caught.append(ptr)
+        return ptr
     
     @logwrap
     def _cxa_end_catch(self):
-        logging.error("_cxa_end_catch not implemented")
-        return 
+        self.setThrew(0, 0)
+        if self.EXCEPTIONS_caught:
+            ptr= self.EXCEPTIONS_caught.pop()
+            info = self.EXCEPTIONS_infos[ptr]
+            if info.destructor:
+                self.dynCall_vi(info.destructor , ptr)
+            self.EXCEPTIONS_infos['last'] = 0
+            self.EXCEPTIONS_infos.pop(ptr)
+            self._cxa_free_exception(ptr)
+    
+    def ___cxa_find_matching_catch(self, *args):
+        thrown = self.EXCEPTIONS_infos['last']
+        if not thrown:
+            self.setTempRet0(0)
+            return 0
+
+        info = self.EXCEPTIONS_infos[thrown]
+        throwntype = info.type
+        
+        if not throwntype:
+            self.setTempRet0(0)
+            return thrown
+
+        type_array = list(args)
+        pointer = self._cxa_is_pointer_type(throwntype)
+
+        # Simulating buffer allocation (a simple list in Python)
+        if self._cxa_find_matching_catch_buffer is None:
+            self._cxa_find_matching_catch_buffer = self._malloc(4)
+
+        self.HEAP32[self._cxa_find_matching_catch_buffer>> 2] = thrown
+        thrown_buffer = self._cxa_find_matching_catch_buffer
+
+        for catch_type in type_array:
+            if catch_type and self._cxa_can_catch(catch_type, throwntype, thrown_buffer):
+                thrown = self.HEAP32[thrown_buffer>>2]
+                info.adjusted = thrown
+                self.setTempRet0(catch_type)
+                return thrown
+
+        thrown = self.HEAP32[thrown_buffer>>2]
+        self.setTempRet0(throwntype)
+        return thrown
     
     @logwrap
-    def _cxa_find_matching_catch_2(self):
-        logging.error("_cxa_find_matching_catch_2 not implemented")
-        return 0
+    def _cxa_find_matching_catch_2(self, *args):
+        ret=  self.___cxa_find_matching_catch(*args)
+        return int(ret)
     
     @logwrap
-    def _cxa_find_matching_catch_3(self,param0):
-        logging.error("_cxa_find_matching_catch_3 not implemented")
-        return 0
+    def _cxa_find_matching_catch_3(self, *args):
+        ret = self.___cxa_find_matching_catch(*args)
+        return int(ret)
     
     @logwrap
-    def _cxa_find_matching_catch_4(self,param0,param1):
-        logging.error("_cxa_find_matching_catch_4 not implemented")
-        return 0
+    def _cxa_find_matching_catch_4(self, *args):
+        ret = self.___cxa_find_matching_catch(*args)
+        return int(ret)
     
     @logwrap
     def _cxa_free_exception(self,param0):
-        logging.error("_cxa_free_exception not implemented")
-        return 
+        return self._free(param0)
     
     @logwrap
     def _cxa_pure_virtual(self):
@@ -1228,10 +1537,10 @@ class wasm_base:
         return 
     
     @logwrap
-    def _cxa_throw(self,param0,param1,param2):
-        logging.error("_cxa_throw not implemented")
-        return 
-    
+    def _cxa_throw(self,ptr, ex_type, destructor):
+        self.EXCEPTIONS_infos[ptr] = JSException(ptr, ex_type, destructor)
+        self.EXCEPTIONS_infos['last'] = ptr
+        raise self.EXCEPTIONS_infos[ptr]
     @logwrap
     def _lock(self,param0):
         return 
@@ -1390,6 +1699,8 @@ class wasm_base:
         try:
             stream = self.SYSCALLS.getStr()
             buf = self.SYSCALLS.get()
+            if not os.path.exists(stream):
+                return -2
             stat = os.stat(stream)
             self.HEAP32[buf >> 2] = stat.st_dev
             self.HEAP32[buf + 4 >> 2] = 0
@@ -1416,9 +1727,37 @@ class wasm_base:
             return -1
     
     @logwrap
-    def _syscall196(self,param0,param1):
-        logging.error("_syscall196 not implemented")
-        return 0
+    def _syscall196(self,param0,varargs):
+        self.SYSCALLS.varargs = varargs
+        try:
+            stream = self.SYSCALLS.getStr()
+            buf = self.SYSCALLS.get()
+            if not os.path.exists(stream):
+                return -2
+            stat = os.stat(stream)
+            self.HEAP32[buf >> 2] = stat.st_dev
+            self.HEAP32[buf + 4 >> 2] = 0
+            self.HEAP32[buf + 8 >> 2] = hash(stat.st_ino) & 0xFFFFFFFF
+            self.HEAP32[buf + 12 >> 2] = stat.st_mode
+            self.HEAP32[buf + 16 >> 2] = stat.st_nlink
+            self.HEAP32[buf + 20 >> 2] = stat.st_uid
+            self.HEAP32[buf + 24 >> 2] = stat.st_gid
+            self.HEAP32[buf + 28 >> 2] = 0  #stat.rdev
+            self.HEAP32[buf + 32 >> 2] = 0
+            self.HEAP32[buf + 36 >> 2] = stat.st_size   
+            self.HEAP32[buf + 40 >> 2] = 4096
+            self.HEAP32[buf + 44 >> 2] = stat.st_size //4096 +1
+            self.HEAP32[buf + 48 >> 2] = int(stat.st_atime)
+            self.HEAP32[buf + 52 >> 2] = 0
+            self.HEAP32[buf + 56 >> 2] = int(stat.st_mtime)
+            self.HEAP32[buf + 60 >> 2] = 0
+            self.HEAP32[buf + 64 >> 2] = int(stat.st_ctime)
+            self.HEAP32[buf + 68 >> 2] = 0
+            self.HEAP32[buf + 72 >> 2] = hash(stat.st_ino) & 0xFFFFFFFF
+            return 0
+        except Exception as e:
+            logging.error("_syscall195 failed" , exc_info=True)
+            return -1
     
     @logwrap
     def _syscall197(self,param0,varargs):
@@ -1519,8 +1858,16 @@ class wasm_base:
     
     @logwrap
     def _syscall4(self, notinuse, varargs):
-        logging.error("_syscall4 not implemented")
-        return 0
+        self.SYSCALLS.varargs = varargs
+        try:
+            stream = self.SYSCALLS.getStreamFromFD()
+            buf = self.SYSCALLS.get()
+            count = self.SYSCALLS.get()
+            ret = stream.write_contents(self.HEAP8, buf, count)
+            return ret
+        except Exception as e:
+            logging.error("_syscall4 failed" , exc_info=True)
+            return -1
     
     @logwrap
     def _syscall40(self,param0,param1):
@@ -1539,8 +1886,20 @@ class wasm_base:
             pathname = self.SYSCALLS.getStr()
             flags = self.SYSCALLS.get()
             mode = self.SYSCALLS.get()
-            if not os.path.exists(pathname) and mode ==0:
-                return -2
+            logging.info(f'{pathname}, {flags} ,{mode}')
+
+            if not (flags & 64):
+                mode = 0
+
+            if not os.path.exists(pathname):
+                if mode ==0:
+                    return -2
+                else:
+                    # create regular file
+                    with open(pathname, 'w') as ofile:
+                        pass
+
+            logging.info(f'{pathname}, {flags} ,{mode}')
             fd= os.open(pathname, flags=flags, mode=mode)
             self.streams[fd] =  FS(fd, pathname)
             return fd
@@ -1803,7 +2162,7 @@ class wasm_base:
     
     @logwrap
     def _emscripten_set_blur_callback_on_thread(self,param0,param1,param2,param3,param4):
-        logging.warning("_emscripten_set_blur_callback_on_thread not implemented -- ignore")
+        logging.warning("_emscripten_set_blur_callback_on_thread not implemented -- ignored")
         return 0
     
     @logwrap
@@ -2323,12 +2682,12 @@ class wasm_base:
     
     @logwrap
     def _glDetachShader(self,param0,param1):
-        logging.error("_glDetachShader not implemented")
+        logging.warning("_glDetachShader not implemented -- ignored")
         return 
     
     @logwrap
     def _glDisable(self,param0):
-        logging.warning("_glDisable not implemented -- ignore")
+        logging.warning("_glDisable not implemented -- ignored")
         return 
     
     @logwrap
@@ -2337,12 +2696,12 @@ class wasm_base:
     
     @logwrap
     def _glDrawArrays(self,param0,param1,param2):
-        logging.warning("_glDrawArrays not implemented -- ignore")
+        logging.warning("_glDrawArrays not implemented -- ignored")
         return 
     
     @logwrap
     def _glDrawArraysInstanced(self,param0,param1,param2,param3):
-        logging.warning("_glDrawArraysInstanced not implemented -- ignore")
+        logging.warning("_glDrawArraysInstanced not implemented -- ignored")
         return 
     
     @logwrap
@@ -2569,7 +2928,6 @@ class wasm_base:
 
     @logwrap
     def _glGetProgramBinary(self,param0,param1,param2,param3,param4):
-        logging.error("_glGetProgramBinary not implemented")
         return 
     
     @logwrap
@@ -2999,8 +3357,7 @@ class wasm_base:
     
     @logwrap
     def _llvm_eh_typeid_for(self,param0):
-        logging.error("_llvm_eh_typeid_for not implemented")
-        return 0
+        return param0
     
     @logwrap
     def _llvm_exp2_f32(self,param0):
@@ -3080,7 +3437,6 @@ class wasm_base:
     
     @logwrap
     def _pthread_mutex_destroy(self,param0):
-        logging.error("_pthread_mutex_destroy not implemented")
         return 0
     
     @logwrap
@@ -3176,184 +3532,373 @@ class wasm_base:
         return 0
     
     @logwrap
-    def f64_rem(self,param0,param1):
-        logging.error("f64_rem not implemented")
-        return 0
+    def f64_rem(self,x,y):
+        return x % y
     
     @logwrap
-    def invoke_iiiiij(self,param0,param1,param2,param3,param4,param5,param6):
-        logging.error("invoke_iiiiij not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_iiiijii(self,param0,param1,param2,param3,param4,param5,param6,param7):
-        logging.error("invoke_iiiijii not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_iiiijjii(self,param0,param1,param2,param3,param4,param5,param6,param7,param8,param9):
-        logging.error("invoke_iiiijjii not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_iiiji(self,param0,param1,param2,param3,param4,param5):
-        logging.error("invoke_iiiji not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_iiijiii(self,param0,param1,param2,param3,param4,param5,param6,param7):
+    def invoke_iiiiij(self, *args):
         sp = self.stackSave()
         try:
-            return self.dynCall_iiijiii(param0,param1,param2,param3,param4,param5,param6,param7)
+            return self.dynCall_iiiiij(*args)
+        except:
+            logging.error('invoke_iiiiij fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_iiiijii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_iiiijii(*args)
+        except:
+            logging.error('invoke_iiiijii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_iiiijjii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_iiiijjii(*args)
+        except:
+            logging.error('invoke_iiiijjii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_iiiji(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_iiiji(*args)
+        except:
+            logging.error('invoke_iiiji fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_iiijiii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_iiijiii(*args)
         except:
             logging.error('invoke_iiijiii fail?', exc_info=True)
-            self.stackRestore()
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 0
-    
+
     @logwrap
-    def invoke_iij(self,param0,param1,param2,param3):
-        logging.error("invoke_iij not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_iiji(self,param0,param1,param2,param3,param4):
-        logging.error("invoke_iiji not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_iijii(self,param0,param1,param2,param3,param4,param5):
-        logging.error("invoke_iijii not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_ijii(self,param0,param1,param2,param3,param4):
-        logging.error("invoke_ijii not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_j(self,param0):
-        logging.error("invoke_j not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_jdi(self,param0,param1,param2):
-        logging.error("invoke_jdi not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_ji(self,param0,param1):
-        logging.error("invoke_ji not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_jii(self,param0,param1,param2):
-        logging.error("invoke_jii not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_jiii(self,param0,param1,param2,param3):
-        logging.error("invoke_jiii not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_jiiii(self,param0,param1,param2,param3,param4):
-        logging.error("invoke_jiiii not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_jiiiii(self,param0,param1,param2,param3,param4,param5):
-        logging.error("invoke_jiiiii not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_jiiiiiiiiii(self,param0,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10):
-        logging.error("invoke_jiiiiiiiiii not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_jiiij(self,param0,param1,param2,param3,param4,param5):
-        logging.error("invoke_jiiij not implemented")
-        return 0
-    
-    @logwrap
-    def invoke_jiiji(self,param0,param1,param2,param3,param4,param5):
-        logging.error("invoke_jiiji not implemented")
-        return 0
-    
-    @logwrap        
-    def invoke_jiji(self,param0,param1,param2,param3,param4):
+    def invoke_iij(self, *args):
         sp = self.stackSave()
         try:
-            return self.dynCall_jiji(param0, param1,param2,param3,param4)
+            return self.dynCall_iij(*args)
+        except:
+            logging.error('invoke_iij fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_iiji(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_iiji(*args)
+        except:
+            logging.error('invoke_iiji fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_iijii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_iijii(*args)
+        except:
+            logging.error('invoke_iijii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_ijii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_ijii(*args)
+        except:
+            logging.error('invoke_ijii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_j(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_j(*args)
+        except:
+            logging.error('invoke_j fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_jdi(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_jdi(*args)
+        except:
+            logging.error('invoke_jdi fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_ji(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_ji(*args)
+        except:
+            logging.error('invoke_ji fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_jii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_jii(*args)
+        except:
+            logging.error('invoke_jii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_jiii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_jiii(*args)
+        except:
+            logging.error('invoke_jiii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_jiiii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_jiiii(*args)
+        except:
+            logging.error('invoke_jiiii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_jiiiii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_jiiiii(*args)
+        except:
+            logging.error('invoke_jiiiii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_jiiiiiiiiii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_jiiiiiiiiii(*args)
+        except:
+            logging.error('invoke_jiiiiiiiiii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_jiiij(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_jiiij(*args)
+        except:
+            logging.error('invoke_jiiij fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_jiiji(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_jiiji(*args)
+        except:
+            logging.error('invoke_jiiji fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
+        return 0
+
+    @logwrap
+    def invoke_jiji(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_jiji(*args)
         except:
             logging.error('invoke_jiji fail?', exc_info=True)
-            self.stackRestore()
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 0
-    
+
     @logwrap
-    def invoke_jijii(self,param0,param1,param2,param3,param4,param5):
-        logging.error("invoke_jijii not implemented")
+    def invoke_jijii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_jijii(*args)
+        except:
+            logging.error('invoke_jijii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 0
-    
+
     @logwrap
-    def invoke_jijiii(self,param0,param1,param2,param3,param4,param5,param6):
-        logging.error("invoke_jijiii not implemented")
+    def invoke_jijiii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_jijiii(*args)
+        except:
+            logging.error('invoke_jijiii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 0
-    
+
     @logwrap
-    def invoke_jijj(self,param0,param1,param2,param3,param4,param5):
-        logging.error("invoke_jijj not implemented")
+    def invoke_jijj(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_jijj(*args)
+        except:
+            logging.error('invoke_jijj fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 0
-    
+
     @logwrap
-    def invoke_jji(self,param0,param1,param2,param3):
-        logging.error("invoke_jji not implemented")
+    def invoke_jji(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_jji(*args)
+        except:
+            logging.error('invoke_jji fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 0
-    
+
     @logwrap
-    def invoke_viiiiiiifjjfii(self,param0,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10,param11,param12,param13,param14,param15):
-        logging.error("invoke_viiiiiiifjjfii not implemented")
+    def invoke_viiiiiiifjjfii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_viiiiiiifjjfii(*args)
+        except:
+            logging.error('invoke_viiiiiiifjjfii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 
-    
+
     @logwrap
-    def invoke_viiiijiiii(self,param0,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10):
-        logging.error("invoke_viiiijiiii not implemented")
+    def invoke_viiiijiiii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_viiiijiiii(*args)
+        except:
+            logging.error('invoke_viiiijiiii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 
-    
+
     @logwrap
-    def invoke_viiij(self,param0,param1,param2,param3,param4,param5):
-        logging.error("invoke_viiij not implemented")
+    def invoke_viiij(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_viiij(*args)
+        except:
+            logging.error('invoke_viiij fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 
-    
+
     @logwrap
-    def invoke_viiiji(self,param0,param1,param2,param3,param4,param5,param6):
-        logging.error("invoke_viiiji not implemented")
+    def invoke_viiiji(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_viiiji(*args)
+        except:
+            logging.error('invoke_viiiji fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 
-    
+
     @logwrap
-    def invoke_viij(self,param0,param1,param2,param3,param4):
-        logging.error("invoke_viij not implemented")
+    def invoke_viij(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_viij(*args)
+        except:
+            logging.error('invoke_viij fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 
-    
+
     @logwrap
-    def invoke_viiji(self,param0,param1,param2,param3,param4,param5):
-        logging.error("invoke_viiji not implemented")
+    def invoke_viiji(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_viiji(*args)
+        except:
+            logging.error('invoke_viiji fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 
-    
+
     @logwrap
-    def invoke_viijji(self,param0,param1,param2,param3,param4,param5,param6,param7):
-        logging.error("invoke_viijji not implemented")
+    def invoke_viijji(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_viijji(*args)
+        except:
+            logging.error('invoke_viijji fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 
-    
+
     @logwrap
-    def invoke_viji(self,param0,param1,param2,param3,param4):
-        logging.error("invoke_viji not implemented")
+    def invoke_viji(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_viji(*args)
+        except:
+            logging.error('invoke_viji fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 
-    
+
     @logwrap
-    def invoke_vijii(self,param0,param1,param2,param3,param4,param5):
-        logging.error("invoke_vijii not implemented")
+    def invoke_vijii(self, *args):
+        sp = self.stackSave()
+        try:
+            return self.dynCall_vijii(*args)
+        except:
+            logging.error('invoke_vijii fail?', exc_info=True)
+            self.stackRestore(sp)
+            self.setThrew(1, 0)
         return 
+
+
     
     @logwrap
     def _atomic_fetch_add_8(self,ptr, vall, valh, memmodel):

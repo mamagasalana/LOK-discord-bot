@@ -584,8 +584,8 @@ class LOK_JS2PY(wasm_base):
                 "invoke_vijii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self.invoke_vijii),
                 "_atomic_fetch_add_8": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._atomic_fetch_add_8),
                 "_glClientWaitSync": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._glClientWaitSync),
-                "log": Func(self.store, FuncType([ValType.i32()], []), self.log),
-                "log2": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self.log2),
+                # "log": Func(self.store, FuncType([ValType.i32()], []), self.log),
+                # "log2": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self.log2),
         }}
 
     def export_wasm_func(self):
@@ -832,8 +832,8 @@ class LOK_JS2PY(wasm_base):
         self.__get_daylight = partial(self.instance.exports(self.store)["__get_daylight"], self.store)
         self.__get_timezone = partial(self.instance.exports(self.store)["__get_timezone"], self.store)
         self._get_environ = partial(self.instance.exports(self.store)["__get_environ"], self.store)
-        self.___cxa_can_catch = partial(self.instance.exports(self.store)["___cxa_can_catch"], self.store)
-        self.___cxa_is_pointer_type = partial(self.instance.exports(self.store)["___cxa_is_pointer_type"], self.store)
+        self._cxa_can_catch = partial(self.instance.exports(self.store)["___cxa_can_catch"], self.store)
+        self._cxa_is_pointer_type = partial(self.instance.exports(self.store)["___cxa_is_pointer_type"], self.store)
         self._i64Add = partial(self.instance.exports(self.store)["_i64Add"], self.store)
         self._saveSetjmp = partial(self.instance.exports(self.store)["_saveSetjmp"], self.store)
         self._testSetjmp = partial(self.instance.exports(self.store)["_testSetjmp"], self.store)

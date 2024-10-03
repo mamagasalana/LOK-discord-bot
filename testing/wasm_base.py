@@ -10,6 +10,7 @@ from functools import wraps
 import re
 import numpy as np
 import math
+import datetime
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'testing')))
 
@@ -17,7 +18,7 @@ from websocketmanager import customWebSocket, JSSYS,ERRNO_CODES, FS, ASM_CONSTS,
 
 # HEAP32_DEBUG= [5914000, 5913988, 5913980, 5913984, 5914448, 5914456] 
 # HEAP32_DEBUG_FULL = HEAP32_DEBUG + [5914000,  5202024, 5949232, 5084484, 5913996, 5949244, 5271560, 5271564, 5271108, 18729848, 18730008, ]
-HEAP32_DEBUG=  [5949536, 12768780, 30976960, 5914040, 5949364, 5914048,5913976, 5913992, 5913996, 5914000]
+HEAP32_DEBUG=  [4199612, 5940699,5950592, 5950900, 5949536, 12768780, 30976960, 5914040, 5949364, 5914048,5913976, 5913992, 5913996, 5914000]
 # HEAP64_DEBUG= [30981832, 30997976]
 HEAP64_DEBUG = []
 
@@ -42,6 +43,8 @@ def logwrap(func):
         try:
             ret =  func(self, *args, **kwargs)
         except Exception as e:
+            with open('npbuffer.txt', 'wb') as ifile:
+                ifile.write(bytes(self.HEAP8))
             if isinstance(e, JSException):
                 logging.error(f"'{func.__name__}' failed")
             else:    
@@ -49,7 +52,7 @@ def logwrap(func):
             raise e
         
         log_msg += f" ||| return {ret}"
-        debug=False
+        debug=True
         if not 'invoke' in func.__name__ and not func.__name__ in ['_atomic_fetch_add_8', 'getTotalMemory']:
             debug=True
 
@@ -74,15 +77,15 @@ class wasm_base:
 
         self.ENV = {}
         self.GETENV_RET = {}
-        self.PAGE_SIZE = 16384;
-        self.WASM_PAGE_SIZE = 65536;
-        self.ASMJS_PAGE_SIZE = 16777216;
-        self.MIN_TOTAL_MEMORY = 16777216;
-        self.TOTAL_MEMORY = 33554432;
+        self.PAGE_SIZE = 16384
+        self.WASM_PAGE_SIZE = 65536
+        self.ASMJS_PAGE_SIZE = 16777216
+        self.MIN_TOTAL_MEMORY = 16777216
+        self.TOTAL_MEMORY = 33554432
         
-        self.TOTAL_STACK= 5242880;
+        self.TOTAL_STACK= 5242880
         self.STATIC_BASE = 1024
-        self.STATICTOP = 5948976;
+        self.STATICTOP = 5948976
         self.DYNAMICTOP_PTR = self.staticAlloc(4)
         self.staticSealed = True
         self.STACKTOP = self.STACK_BASE = self.alignMemory(self.STATICTOP)
@@ -125,6 +128,9 @@ class wasm_base:
         self.EXCEPTIONS_caught = []
 
         self._cxa_find_matching_catch_buffer = None
+        self.tm_current = 5948992
+        self._tzset_called =False
+
     @logwrap
     def abort(self,param0):
         logging.error("abort not implemented")
@@ -1571,9 +1577,34 @@ class wasm_base:
         return 0
     
     @logwrap
-    def _syscall122(self,param0,param1):
-        logging.error("_syscall122 not implemented")
-        return 0
+    def _syscall122(self,param0,varargs):
+        self.SYSCALLS.varargs = varargs
+        try:
+            buf = self.SYSCALLS.get()
+            if not buf:
+                return -ERRNO_CODES.EFAULT;
+            layout = {
+                "sysname": 0,
+                "nodename": 65,
+                "domainname": 325,
+                "machine": 260,
+                "version": 195,
+                "release": 130,
+                "__size__": 390
+            }
+            def copyString(element, value):
+                offset = layout[element]
+                self.writeAsciiToMemory(value, buf + offset)
+        
+            copyString("sysname", "Emscripten");
+            copyString("nodename", "emscripten");
+            copyString("release", "1.0");
+            copyString("version", "#1");
+            copyString("machine", "x86-JS");
+            return 0
+        except Exception as e:
+            logging.error("_syscall122" , exc_info=True)
+            return -1
     
     @logwrap
     def _syscall140(self,param0,varargs):
@@ -2029,9 +2060,8 @@ class wasm_base:
         return 0
     
     @logwrap
-    def _difftime(self,param0,param1):
-        logging.error("_difftime not implemented")
-        return 0
+    def _difftime(self,time1, time0):
+        return time1 -time0
     
     @logwrap
     def _dlclose(self,param0):
@@ -3346,9 +3376,31 @@ class wasm_base:
         return 
     
     @logwrap
-    def _gmtime(self,param0):
-        logging.error("_gmtime not implemented")
-        return 0
+    def _gmtime(self,time_addr):
+        tm_ptr = self.tm_current
+        # Retrieve the timestamp in seconds
+        timestamp = self.HEAP32[time_addr >> 2]
+        
+        # Convert timestamp to UTC datetime
+        date = datetime.datetime.utcfromtimestamp(timestamp)
+        
+        # Store individual components into HEAP32
+        self.HEAP32[tm_ptr >> 2] = date.second
+        self.HEAP32[(tm_ptr + 4) >> 2] = date.minute
+        self.HEAP32[(tm_ptr + 8) >> 2] = date.hour
+        self.HEAP32[(tm_ptr + 12) >> 2] = date.day
+        self.HEAP32[(tm_ptr + 16) >> 2] = date.month - 1  # JavaScript months are 0-11, Python is 1-12
+        self.HEAP32[(tm_ptr + 20) >> 2] = date.year - 1900
+        self.HEAP32[(tm_ptr + 24) >> 2] = date.weekday()  # Monday = 0, Sunday = 6 in Python
+        self.HEAP32[(tm_ptr + 36) >> 2] = 0
+        self.HEAP32[(tm_ptr + 32) >> 2] = 0
+        
+        # Calculate the day of the year (yday)
+        start = datetime.datetime(date.year, 1, 1)
+        yday = (date - start).days
+        self.HEAP32[(tm_ptr + 28) >> 2] = yday
+        self.HEAP32[(tm_ptr + 40) >> 2] = self.tm_timezone
+        return tm_ptr
     
     @logwrap
     def _inet_addr(self,param0):
@@ -3397,10 +3449,60 @@ class wasm_base:
         logging.error("_longjmp not implemented")
         return 
     
+    def _tzset(self):
+        if self._tzset_called:
+            return
+        self._tzset_called =True
+
+        # Set timezone offset in seconds
+        self.HEAP32[self._get_timezone() >> 2] = time.timezone
+
+        # Calculate daylight saving time
+        current_year = datetime.datetime.now().year
+        self.HEAP32[self._get_daylight() >> 2] = 0
+
+        winter_name = 'Malaysia Time'
+        summer_name = 'Malaysia Time'
+
+        # Allocate memory for the timezone names
+        winter_name_ptr = self.allocate(self.intArrayFromString(winter_name), "i8", self.ALLOC_NORMAL)
+        summer_name_ptr = self.allocate(self.intArrayFromString(summer_name), "i8", self.ALLOC_NORMAL)
+
+        self.HEAP32[self._get_tzname() >> 2] = summer_name_ptr
+        self.HEAP32[(self._get_tzname() + 4) >> 2] = winter_name_ptr
+    
     @logwrap
-    def _mktime(self,param0):
-        logging.error("_mktime not implemented")
-        return 0
+    def _mktime(self,tm_ptr):
+        self._tzset()
+        date = datetime.datetime(
+            self.HEAP32[(tm_ptr + 20) >> 2] + 1900,  # Year
+            self.HEAP32[(tm_ptr + 16) >> 2] + 1,     # Month (Python is 1-12, JS is 0-11)
+            self.HEAP32[(tm_ptr + 12) >> 2],         # Day
+            self.HEAP32[(tm_ptr + 8) >> 2],          # Hour
+            self.HEAP32[(tm_ptr + 4) >> 2],          # Minute
+            self.HEAP32[tm_ptr >> 2],                # Second
+        )
+
+        # Daylight Saving Time adjustment
+        TIME_OFFSET = -480
+        dst = self.HEAP32[(tm_ptr + 32) >> 2]
+        guessed_offset = TIME_OFFSET
+        
+        start = datetime.datetime(date.year, 1, 1)
+        summer = datetime.datetime(date.year, 7, 1)
+        
+        winter_offset = TIME_OFFSET
+        summer_offset = TIME_OFFSET
+        
+        dst_offset = min(winter_offset, summer_offset)
+
+        # Update day of week and day of year
+        self.HEAP32[(tm_ptr + 24) >> 2] = date.weekday()
+        yday = (date - start).days
+        self.HEAP32[(tm_ptr + 28) >> 2] = yday
+
+        # Return timestamp in seconds
+        return int(date.timestamp())
     
     @logwrap
     def _pthread_cond_destroy(self,param0):
@@ -3916,7 +4018,7 @@ class wasm_base:
 
 
     def emscriptenWebGLGet(self, name_, p, type):
-        if not p:
+        if not p:   
             self.GL.lastError = 1281
             return
 

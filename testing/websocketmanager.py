@@ -453,7 +453,7 @@ class GL:
     
     def ctx_getTexParameter(self, *args):
         if not args in self.text_param:
-            logging.error(f'ctx_getTexParameter {args} not found')
+            logging.warning(f'ctx_getTexParameter {args} not found')
         
         ret = self.text_param.get(args, 0)
         return ret

@@ -41,9 +41,10 @@ from services.lok_service import LokService
 from JS2PY import LOK_JS2PY
 
 lok = LOK_JS2PY("testing/js_testing/test.wasm")
-lok.HEAP32[5948976//4] = 11191872
-lok.HEAP32[5948960//4] =  5524807
+lok.HEAP32[5948976>>2] = 11191872
+lok.HEAP32[5948960>>2] =  5524807
 
+lok.HEAP32[5950900>>2] =124
 # processWasmFrameworkJob
 #5914000 :30988952
 # enlargeMemory

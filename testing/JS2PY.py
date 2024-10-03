@@ -56,6 +56,11 @@ class LOK_JS2PY(wasm_base):
             self.export_wasm_func()
             self.ws = WebSocketClientManager(self)
 
+            self.tm_timezone = 5948960
+            # self.tm_timezone= self.allocate(self.intArrayFromString("GMT"), "i8", self.ALLOC_STATIC)
+            # print(self.HEAP32[5948976//4] , 11191872)
+            # print(self.HEAP32[5948960//4] , 5524807)
+            # print('debug')
 
     def init_base_func(self):
         self.import_object = {
@@ -828,9 +833,9 @@ class LOK_JS2PY(wasm_base):
         self._ntohs = partial(self.instance.exports(self.store)["_ntohs"], self.store)
         self._htonl = partial(self.instance.exports(self.store)["_htonl"], self.store)
         self.___emscripten_environ_constructor = partial(self.instance.exports(self.store)["___emscripten_environ_constructor"], self.store)
-        self.__get_tzname = partial(self.instance.exports(self.store)["__get_tzname"], self.store)
-        self.__get_daylight = partial(self.instance.exports(self.store)["__get_daylight"], self.store)
-        self.__get_timezone = partial(self.instance.exports(self.store)["__get_timezone"], self.store)
+        self._get_tzname = partial(self.instance.exports(self.store)["__get_tzname"], self.store)
+        self._get_daylight = partial(self.instance.exports(self.store)["__get_daylight"], self.store)
+        self._get_timezone = partial(self.instance.exports(self.store)["__get_timezone"], self.store)
         self._get_environ = partial(self.instance.exports(self.store)["__get_environ"], self.store)
         self._cxa_can_catch = partial(self.instance.exports(self.store)["___cxa_can_catch"], self.store)
         self._cxa_is_pointer_type = partial(self.instance.exports(self.store)["___cxa_is_pointer_type"], self.store)

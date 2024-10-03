@@ -57,11 +57,11 @@ def logwrap(func):
             debug=True
 
         if HEAP64_DEBUG and debug:
-            out = {x: self.HEAP64[x//8] for x in HEAP64_DEBUG}
+            out = {x: int(self.HEAP64[x//8]) for x in HEAP64_DEBUG}
             log_msg += f" ||| {out}"
 
         if HEAP32_DEBUG  and debug:
-            out = {x: self.HEAP32[x//4] for x in HEAP32_DEBUG}
+            out = {x: int(self.HEAP32[x//4]) for x in HEAP32_DEBUG}
             log_msg += f" ||| {out}"
 
         # if not 'invoke' in func.__name__ and not func.__name__ in ['_atomic_fetch_add_8', 'getTotalMemory']:
@@ -128,7 +128,7 @@ class wasm_base:
         self.EXCEPTIONS_caught = []
 
         self._cxa_find_matching_catch_buffer = None
-        self.tm_current = 5948992
+        self.tm_current = 5948912
         self._tzset_called =False
 
     @logwrap
@@ -2061,7 +2061,7 @@ class wasm_base:
     
     @logwrap
     def _difftime(self,time1, time0):
-        return time1 -time0
+        return float(time1 -time0)
     
     @logwrap
     def _dlclose(self,param0):
@@ -2445,9 +2445,9 @@ class wasm_base:
     
     @logwrap
     def _gettimeofday(self,ptr,param1):
-        now = time.time()*1000 % 1e3 * 1e3 
-        self.HEAP32[ptr >> 2] = int(now / 1e3) | 0;
-        self.HEAP32[ptr + 4 >> 2] = int(now % 1e3 * 1e3) | 0;
+        now = time.time()* 1e3
+        self.HEAP32[ptr >> 2] = int(now / 1e3) 
+        self.HEAP32[ptr + 4 >> 2] = int(now % 1e3 * 1e3) 
         return 0
     
     @logwrap
@@ -3440,9 +3440,32 @@ class wasm_base:
         return 0
     
     @logwrap
-    def _localtime(self,param0):
-        logging.error("_localtime not implemented")
-        return 0
+    def _localtime(self,time_addr):
+        self._tzset()
+        tmPtr = self.tm_current
+        predate = self.HEAP32[time_addr >> 2]
+        date = datetime.datetime.fromtimestamp(predate)
+        self.HEAP32[ tmPtr >> 2] = date.second
+        self.HEAP32[(tmPtr + 4 )>> 2] = date.minute
+        self.HEAP32[(tmPtr + 8 )>> 2] = date.hour
+        self.HEAP32[(tmPtr + 12 )>> 2] = date.day
+        self.HEAP32[(tmPtr + 16 )>> 2] = date.month - 1
+        self.HEAP32[(tmPtr + 20 )>> 2] = date.year - 1900
+        self.HEAP32[(tmPtr + 24 )>> 2] = date.weekday()
+
+        start_of_year = datetime.datetime(date.year, 1, 1)
+        yday = (date - start_of_year).days
+        self.HEAP32[(tmPtr + 28) >> 2] = yday
+
+        TIME_OFFSET = -480
+        self.HEAP32[(tmPtr + 36 )>> 2] = -(TIME_OFFSET* 60)
+        summerOffset = TIME_OFFSET
+        winterOffset = TIME_OFFSET
+        dst = 0
+        self.HEAP32[(tmPtr + 32) >> 2] = dst
+        zonePtr = self.HEAP32[self._get_tzname() + (4 if dst else 0) >> 2]
+        self.HEAP32[tmPtr + 40 >> 2] = zonePtr
+        return tmPtr
     
     @logwrap
     def _longjmp(self,param0,param1):

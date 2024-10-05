@@ -44,7 +44,6 @@ lok = LOK_JS2PY("testing/js_testing/test.wasm")
 lok.HEAP32[5948976>>2] = 11191872
 lok.HEAP32[5948960>>2] =  5524807
 
-lok.HEAP32[5950900>>2] =124
 # processWasmFrameworkJob
 #5914000 :30988952
 # enlargeMemory
@@ -64,13 +63,14 @@ lok.HEAP32[5950900>>2] =124
 
 lok._AT_INIT()
 lok._AT_MAIN()
-a = LokService()
-a.login()
-token = a.accessToken
+# a = LokService()
+# a.login()
+# token = a.accessToken
 
-URL = f"wss://socf-lok-live.leagueofkingdoms.com/socket.io/?EIO=4&transport=websocket&token={token}"
-lok._WS_Create(URL, '', 17058,17691,14198,17692,14199 )
-print('\ndebug started')
+# URL = f"wss://socf-lok-live.leagueofkingdoms.com/socket.io/?EIO=4&transport=websocket&token={token}"
+# lok._WS_Create(URL, '', 17058,17691,14198,17692,14199 )
+# print('\ndebug started')
+
 # set breakpoint at 
 #  def _WS_Create
 # >> on_message_wrapper

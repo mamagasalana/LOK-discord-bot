@@ -6,11 +6,12 @@ import os
 import ctypes
 import time
 import io
-from functools import wraps
+from functools import wraps, partial
 import re
 import numpy as np
 import math
 import datetime
+from requests_futures.sessions import FuturesSession
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'testing')))
 
@@ -18,7 +19,7 @@ from websocketmanager import customWebSocket, JSSYS,ERRNO_CODES, FS, ASM_CONSTS,
 
 # HEAP32_DEBUG= [5914000, 5913988, 5913980, 5913984, 5914448, 5914456] 
 # HEAP32_DEBUG_FULL = HEAP32_DEBUG + [5914000,  5202024, 5949232, 5084484, 5913996, 5949244, 5271560, 5271564, 5271108, 18729848, 18730008, ]
-HEAP32_DEBUG=  [4199612, 5940699,5950592, 5950900, 5949536, 12768780, 30976960, 5914040, 5949364, 5914048,5913976, 5913992, 5913996, 5914000]
+HEAP32_DEBUG=  [4199612, 5940696,5950592, 5950900, 5949536, 12768780, 30976960, 5914040, 5949364, 5914048,5913976, 5913992, 5913996, 5914000]
 # HEAP64_DEBUG= [30981832, 30997976]
 HEAP64_DEBUG = []
 
@@ -52,7 +53,7 @@ def logwrap(func):
             raise e
         
         log_msg += f" ||| return {ret}"
-        debug=True
+        debug=False
         if not 'invoke' in func.__name__ and not func.__name__ in ['_atomic_fetch_add_8', 'getTotalMemory']:
             debug=True
 
@@ -130,6 +131,16 @@ class wasm_base:
         self._cxa_find_matching_catch_buffer = None
         self.tm_current = 5948912
         self._tzset_called =False
+
+        self.Module_no_exit_runtime= True
+        self.func_wrappers = {}
+        self.threads ={}
+        self.main_loop_tid =None
+
+
+        # Create a session object
+        self.session = FuturesSession()
+        self.rpcs = {}
 
     @logwrap
     def abort(self,param0):
@@ -823,32 +834,63 @@ class wasm_base:
         return 
     
     @logwrap
-    def _JS_Eval_ClearInterval(self,param0):
-        return 
+    def _JS_Eval_ClearInterval(self,tid):
+        t = self.threads[tid]
+        t.set()
     
     @logwrap
     def _JS_Eval_OpenURL(self,param0):
         return 
     
+    def getFuncWrapper(self, func, sig):
+        if not func:
+            return
+        assert (sig)
+        
+        if sig not in self.func_wrappers:
+            self.func_wrappers[sig] = {}
+        
+        sig_cache = self.func_wrappers[sig]
+        
+        if func not in sig_cache:
+            fx =eval(f'self.dynCall_{sig}')
+            fx2 = partial(fx, func)
+            sig_cache[func] = fx2
+        
+        return sig_cache[func]
+
+    
+
     @logwrap
-    def _JS_Eval_SetInterval(self,param0,param1,param2):
-        logging.error("_JS_Eval_SetInterval not implemented")
-        return 0
+    def _JS_Eval_SetInterval(self,func,arg,millis):
+        self.Module_no_exit_runtime =True
+        tid = len(self.threads)
+        tid_event = threading.Event()
+
+        def wrapper():
+            while not tid_event.is_set():
+                logging.info(f"thread - {tid} -- running")
+                self.getFuncWrapper(func, 'vi')(arg)
+                # Schedule the next execution
+                time.sleep(1)
+
+        threading.Timer(millis / 1000, wrapper).start()
+        self.threads[tid] = tid_event
+
+        return tid
     
     @logwrap
     def _JS_FileSystem_Initialize(self):
-        logging.error("_JS_FileSystem_Initialize not implemented")
+        logging.warning("_JS_FileSystem_Initialize not implemented -- ignored")
         return 
     
     @logwrap
     def _JS_FileSystem_Sync(self):
-        logging.error("_JS_FileSystem_Sync not implemented")
+        logging.warning("_JS_FileSystem_Sync not implemented -- ignored")
         return 
     
     @logwrap
     def _JS_Log_Dump(self,ptr,param1):
-        if ptr ==5950112:
-            raise ValueError('hehe')
         strr = self.Pointer_stringify(ptr);
         if param1 in [0, 1, 4]:
             logging.error(strr)
@@ -972,9 +1014,9 @@ class wasm_base:
         return 0
     
     @logwrap
-    def _JS_SystemInfo_GetCanvasClientSize(self,param0,param1,param2):
-        logging.error("_JS_SystemInfo_GetCanvasClientSize not implemented")
-        return 
+    def _JS_SystemInfo_GetCanvasClientSize(self,domElementSelector, outWidth, outHeight):
+        self.HEAPF64[outWidth >> 3] = 1920
+        self.HEAPF64[outHeight >> 3] = 910
     
     @logwrap
     def _JS_SystemInfo_GetDocumentURL(self,param0,param1):
@@ -1212,9 +1254,23 @@ class wasm_base:
         return 
     
     @logwrap
-    def _JS_WebRequest_Create(self,param0,param1):
-        logging.error("_JS_WebRequest_Create not implemented")
-        return 0
+    def _JS_WebRequest_Create(self, url, method):
+        _url = self.Pointer_stringify(url) 
+        logging.info(_url)
+        _method = self.Pointer_stringify(method)
+
+        cache_control_value = 'must-revalidate'
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
+                   "Cache-Control": cache_control_value}
+
+        details = {
+            'method' :_method,
+            'url': _url,
+            'headers' : headers,
+        }
+        rpcid = len(self.rpcs)
+        self.rpcs[rpcid] = details
+        return rpcid
     
     @logwrap
     def _JS_WebRequest_GetResponseHeaders(self,param0,param1,param2):
@@ -1227,28 +1283,59 @@ class wasm_base:
         return 
     
     @logwrap
-    def _JS_WebRequest_Send(self,param0,param1,param2):
-        logging.error("_JS_WebRequest_Send not implemented")
+    def _JS_WebRequest_Send(self,rpcid, ptr, length):
+        details = self.rpcs[rpcid]
+        if length:
+            postdata=  self.HEAP8[ptr: ptr+length]
+
+            self.session.request(details['method'], 
+                                 details['url'], 
+                                 headers=details['headers'],
+                                 hooks=details['callback'])
+            
+        else:
+            self.session.request(details['method'], 
+                                 details['url'], 
+                                 headers=details['headers'],
+                                 hooks=details['callback'])
+
         return 
     
     @logwrap
     def _JS_WebRequest_SetProgressHandler(self,param0,param1,param2):
-        logging.error("_JS_WebRequest_SetProgressHandler not implemented")
+        logging.warning("_JS_WebRequest_SetProgressHandler not implemented -- ignored")
         return 
     
     @logwrap
-    def _JS_WebRequest_SetRequestHeader(self,param0,param1,param2):
-        logging.error("_JS_WebRequest_SetRequestHeader not implemented")
+    def _JS_WebRequest_SetRequestHeader(self,rpcid, header, value):
+        details = self.rpcs[rpcid]
+        header = self.Pointer_stringify(header)
+        value = self.Pointer_stringify(value)
+        details['headers'][header] = value
         return 
     
     @logwrap
-    def _JS_WebRequest_SetResponseHandler(self,param0,param1,param2):
-        logging.error("_JS_WebRequest_SetResponseHandler not implemented")
+    def _JS_WebRequest_SetResponseHandler(self,rpcid, arg, onresponse):
+        details = self.rpcs[rpcid]
+
+        def callback(response, *args, **kwargs):
+            kWebRequestOK = 0  # Placeholder for WebRequest status
+
+            if response.content:
+                # Allocate memory buffer for the response content
+                buffer_size = len(response.content)
+                buffer = self._malloc(buffer_size)
+                
+                self.HEAP8[buffer:buffer+buffer_size] = np.frombuffer(response.content, dtype=np.uint8)
+                self.dynCall_viiiiii(onresponse, arg, response.status, buffer, buffer_size, 0, kWebRequestOK)
+            else:
+                self.dynCall_viiiiii(onresponse, arg, response.status, 0, 0, 0, kWebRequestOK)
+
+        details['callback'] = {'response': callback}
         return 
     
     @logwrap
     def _JS_WebRequest_SetTimeout(self,param0,param1):
-        logging.error("_JS_WebRequest_SetTimeout not implemented")
         return 
     
     @logwrap
@@ -2122,8 +2209,13 @@ class wasm_base:
         return 0
     
     @logwrap
-    def _emscripten_get_fullscreen_status(self,param0):
-        logging.error("_emscripten_get_fullscreen_status not implemented")
+    def _emscripten_get_fullscreen_status(self,eventStruct):
+        self.HEAP32[eventStruct >> 2] = 0;
+        self.HEAP32[eventStruct + 4 >> 2] = 1
+        self.HEAP32[eventStruct + 264 >> 2] = 0
+        self.HEAP32[eventStruct + 268 >> 2] = 0
+        self.HEAP32[eventStruct + 272 >> 2] = 1920
+        self.HEAP32[eventStruct + 276 >> 2] = 1080
         return 0
     
     @logwrap
@@ -2142,8 +2234,7 @@ class wasm_base:
     
     @logwrap
     def _emscripten_get_num_gamepads(self):
-        logging.error("_emscripten_get_num_gamepads not implemented")
-        return 0
+        return 4
     
     @logwrap
     def _emscripten_has_threading_support(self):
@@ -2157,7 +2248,6 @@ class wasm_base:
     
     @logwrap
     def _emscripten_is_webgl_context_lost(self,param0):
-        logging.error("_emscripten_is_webgl_context_lost not implemented")
         return 0
     
     @logwrap
@@ -2197,7 +2287,6 @@ class wasm_base:
     
     @logwrap
     def _emscripten_set_canvas_element_size(self,param0,param1,param2):
-        logging.error("_emscripten_set_canvas_element_size not implemented")
         return 0
     
     @logwrap
@@ -2258,8 +2347,19 @@ class wasm_base:
         return 0
     
     @logwrap
-    def _emscripten_set_main_loop(self,param0,param1,param2):
-        logging.error("_emscripten_set_main_loop not implemented")
+    def _emscripten_set_main_loop(self,func,param1,param2):
+        tid = len(self.threads)
+        tid_event = threading.Event()
+
+        def wrapper():
+            while not tid_event.is_set():
+                logging.info(f"thread - {tid} -- running")
+                self.dynCall_v(func) 
+                time.sleep(1)
+
+        threading.Timer(1, wrapper).start()
+        self.threads[tid] = tid_event
+        self.main_loop_tid  = tid
         return 
     
     @logwrap
@@ -3557,7 +3657,7 @@ class wasm_base:
     
     @logwrap
     def _pthread_key_delete(self,param0):
-        logging.error("_pthread_key_delete not implemented")
+        logging.warning("_pthread_key_delete not implemented -- ignored")
         return 0
     
     @logwrap
@@ -3630,9 +3730,57 @@ class wasm_base:
         return 0
     
     @logwrap
-    def _strftime(self,param0,param1,param2,param3):
-        logging.error("_strftime not implemented")
-        return 0
+    def _strftime(self,s, maxsize, format_string, tm):
+
+        tm_zone = self.HEAP32[tm + 40 >> 2]
+    
+        date = {
+            'tm_sec': self.HEAP32[tm >> 2],
+            'tm_min': self.HEAP32[(tm + 4) >> 2],
+            'tm_hour': self.HEAP32[(tm + 8) >> 2],
+            'tm_mday': self.HEAP32[(tm + 12) >> 2],
+            'tm_mon': self.HEAP32[(tm + 16) >> 2] + 1,  # Python months are 1-12
+            'tm_year': self.HEAP32[(tm + 20) >> 2] + 1900,
+            'tm_wday': self.HEAP32[(tm + 24) >> 2],
+            'tm_yday': self.HEAP32[(tm + 28) >> 2],
+            'tm_isdst': self.HEAP32[(tm + 32) >> 2],
+            'tm_gmtoff': self.HEAP32[(tm + 36) >> 2],
+            'tm_zone': tm_zone
+        }
+        # Create a datetime object
+        date_obj = datetime.datetime(
+            date['tm_year'],
+            date['tm_mon'],
+            date['tm_mday'],
+            date['tm_hour'],
+            date['tm_min'],
+            date['tm_sec']
+        )
+
+        # Expand format string based on rules
+        EXPANSION_RULES = {
+            "%c": "%a %b %d %H:%M:%S %Y",
+            "%D": "%m/%d/%y",
+            "%F": "%Y-%m-%d",
+            "%h": "%b",
+            "%r": "%I:%M:%S %p",
+            "%R": "%H:%M",
+            "%T": "%H:%M:%S",
+            "%x": "%m/%d/%y",
+            "%X": "%H:%M:%S"
+        }
+        pattern = self.Pointer_stringify(format_string)
+        for rule, replacement in EXPANSION_RULES.items():
+            pattern = pattern.replace(rule, replacement)
+
+        # Use strftime to format the datetime object
+        formatted_date = date_obj.strftime(pattern)
+        if pattern == '%Z':
+            formatted_date = 'Malaysia Time'
+        
+        ret = self.intArrayFromString(formatted_date, False)
+        self.HEAP8[s: s+len(ret)] = ret
+        return len(ret) -1
     
     @logwrap
     def _sysconf(self,param0):

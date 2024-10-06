@@ -133,8 +133,11 @@ class wasm_base:
         self._tzset_called =False
 
         self.Module_no_exit_runtime= True
-        self.func_wrappers = {}
+        self.func_wrappers = {}                                                                 
         self.threads ={}
+        # t = threading.Timer(1, self.custom_thread )
+        # t.start()
+
         self.main_loop_tid =None
 
 
@@ -859,13 +862,25 @@ class wasm_base:
         
         return sig_cache[func]
 
-    
+    def custom_thread(self):
+        while True:
+            time.sleep(1)
+            for func, env in self.threads.values():
+                if not env.is_set():
+                    func()
+                time.sleep(1)
 
     @logwrap
     def _JS_Eval_SetInterval(self,func,arg,millis):
         self.Module_no_exit_runtime =True
         tid = len(self.threads)
         tid_event = threading.Event()
+
+        # def wrapper():
+        #     logging.info(f"thread - {tid} -- running")
+        #     self.getFuncWrapper(func, 'vi')(arg)
+
+        # self.threads[tid] = (wrapper, tid_event)
 
         def wrapper():
             while not tid_event.is_set():
@@ -2220,8 +2235,8 @@ class wasm_base:
     
     @logwrap
     def _emscripten_get_gamepad_status(self,param0,param1):
-        logging.error("_emscripten_get_gamepad_status not implemented")
-        return 0
+        logging.error("_emscripten_get_gamepad_status not implemented -- warning")
+        return -7
     
     @logwrap
     def _emscripten_get_main_loop_timing(self,param0,param1):
@@ -2350,6 +2365,12 @@ class wasm_base:
     def _emscripten_set_main_loop(self,func,param1,param2):
         tid = len(self.threads)
         tid_event = threading.Event()
+
+        # def wrapper():
+        #     logging.info(f"thread - {tid} -- running")
+        #     self.dynCall_v(func) 
+
+        # self.threads[tid] = (wrapper, tid_event)
 
         def wrapper():
             while not tid_event.is_set():

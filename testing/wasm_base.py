@@ -135,12 +135,13 @@ class wasm_base:
         self.Module_no_exit_runtime= True
         self.func_wrappers = {}                                                                 
         self.threads ={}
-        # t = threading.Timer(1, self.custom_thread )
-        # t.start()
+        t = threading.Timer(1, self.custom_thread )
+        t.start()
 
         self.main_loop_tid =None
 
-
+        self.videoInstances  = {}
+        
         # Create a session object
         self.session = FuturesSession()
         self.rpcs = {}
@@ -876,32 +877,32 @@ class wasm_base:
         tid = len(self.threads)
         tid_event = threading.Event()
 
-        # def wrapper():
-        #     logging.info(f"thread - {tid} -- running")
-        #     self.getFuncWrapper(func, 'vi')(arg)
-
-        # self.threads[tid] = (wrapper, tid_event)
-
         def wrapper():
-            while not tid_event.is_set():
-                logging.info(f"thread - {tid} -- running")
-                self.getFuncWrapper(func, 'vi')(arg)
-                # Schedule the next execution
-                time.sleep(1)
+            logging.info(f"thread - {tid} -- running")
+            self.getFuncWrapper(func, 'vi')(arg)
 
-        threading.Timer(millis / 1000, wrapper).start()
-        self.threads[tid] = tid_event
+        self.threads[tid] = (wrapper, tid_event)
+
+        # def wrapper():
+        #     while not tid_event.is_set():
+        #         logging.info(f"thread - {tid} -- running")
+        #         self.getFuncWrapper(func, 'vi')(arg)
+        #         # Schedule the next execution
+        #         time.sleep(1)
+
+        # threading.Timer(millis / 1000, wrapper).start()
+        # self.threads[tid] = tid_event
 
         return tid
     
     @logwrap
     def _JS_FileSystem_Initialize(self):
-        logging.warning("_JS_FileSystem_Initialize not implemented -- ignored")
+        logging.warning("_JS_FileSystem_Initialize -- ignored")
         return 
     
     @logwrap
     def _JS_FileSystem_Sync(self):
-        logging.warning("_JS_FileSystem_Sync not implemented -- ignored")
+        logging.warning("_JS_FileSystem_Sync -- ignored")
         return 
     
     @logwrap
@@ -940,7 +941,7 @@ class wasm_base:
     
     @logwrap
     def _JS_Sound_Init(self):
-        logging.warning("_JS_Sound_Init not implemented -- ignored")
+        logging.warning("_JS_Sound_Init -- ignored")
         return 
     
     @logwrap
@@ -1075,9 +1076,11 @@ class wasm_base:
         self.HEAPF64[param1 >> 3] = 1080
     
     @logwrap
-    def _JS_SystemInfo_GetStreamingAssetsURL(self,param0,param1):
-        logging.error("_JS_SystemInfo_GetStreamingAssetsURL not implemented")
-        return 0
+    def _JS_SystemInfo_GetStreamingAssetsURL(self,buffer,bufferSize):
+        streamingAssetsUrl = 'https://play.leagueofkingdoms.com/StreamingAssets'
+        if buffer:
+            self.stringToUTF8(streamingAssetsUrl, buffer, bufferSize)
+        return self.lengthBytesUTF8(streamingAssetsUrl)
     
     @logwrap
     def _JS_SystemInfo_HasCursorLock(self):
@@ -1100,13 +1103,14 @@ class wasm_base:
     
     @logwrap
     def _JS_Video_CanPlayFormat(self,param0):
-        logging.error("_JS_Video_CanPlayFormat not implemented")
-        return 0
+        format = self.UTF8ToString(param0)
+        return 1
     
     @logwrap
     def _JS_Video_Create(self,param0):
-        logging.error("_JS_Video_Create not implemented")
-        return 0
+        url = self.UTF8ToString(param0)
+        self.videoInstances[len(self.videoInstances)+1] = {'url': url, 'state': 0}
+        return len(self.videoInstances)
     
     @logwrap
     def _JS_Video_Destroy(self,param0):
@@ -1130,8 +1134,8 @@ class wasm_base:
     
     @logwrap
     def _JS_Video_GetNumAudioTracks(self,param0):
-        logging.error("_JS_Video_GetNumAudioTracks not implemented")
-        return 0
+        logging.warning("_JS_Video_GetNumAudioTracks -- ignored")
+        return 1
     
     @logwrap
     def _JS_Video_Height(self,param0):
@@ -1140,13 +1144,15 @@ class wasm_base:
     
     @logwrap
     def _JS_Video_IsPlaying(self,param0):
-        logging.error("_JS_Video_IsPlaying not implemented")
+        logging.warning("_JS_Video_IsPlaying -- ignored")
         return 0
     
     @logwrap
     def _JS_Video_IsReady(self,param0):
-        logging.error("_JS_Video_IsReady not implemented")
-        return 0
+        v = self.videoInstances[param0]
+        state= v['state']
+        v['state'] =1
+        return state
     
     @logwrap
     def _JS_Video_Pause(self,param0):
@@ -1155,7 +1161,6 @@ class wasm_base:
     
     @logwrap
     def _JS_Video_Play(self,param0,param1):
-        logging.error("_JS_Video_Play not implemented")
         return 
     
     @logwrap
@@ -1165,12 +1170,12 @@ class wasm_base:
     
     @logwrap
     def _JS_Video_SetEndedHandler(self,param0,param1,param2):
-        logging.error("_JS_Video_SetEndedHandler not implemented")
+        logging.warning("_JS_Video_SetEndedHandler -- ignored")
         return 
     
     @logwrap
     def _JS_Video_SetErrorHandler(self,param0,param1,param2):
-        logging.error("_JS_Video_SetErrorHandler not implemented")
+        logging.warning("_JS_Video_SetErrorHandler -- ignored")
         return 
     
     @logwrap
@@ -1318,7 +1323,7 @@ class wasm_base:
     
     @logwrap
     def _JS_WebRequest_SetProgressHandler(self,param0,param1,param2):
-        logging.warning("_JS_WebRequest_SetProgressHandler not implemented -- ignored")
+        logging.warning("_JS_WebRequest_SetProgressHandler -- ignored")
         return 
     
     @logwrap
@@ -1340,7 +1345,7 @@ class wasm_base:
                 # Allocate memory buffer for the response content
                 buffer_size = len(response.content)
                 buffer = self._malloc(buffer_size)
-                
+                logging.info(f"_JS_WebRequest_SetResponseHandler done {buffer}")
                 self.HEAP8[buffer:buffer+buffer_size] = np.frombuffer(response.content, dtype=np.uint8)
                 self.dynCall_viiiiii(onresponse, arg, response.status, buffer, buffer_size, 0, kWebRequestOK)
             else:
@@ -2235,13 +2240,15 @@ class wasm_base:
     
     @logwrap
     def _emscripten_get_gamepad_status(self,param0,param1):
-        logging.error("_emscripten_get_gamepad_status not implemented -- warning")
+        logging.warning("_emscripten_get_gamepad_status -- warning")
         return -7
     
     @logwrap
-    def _emscripten_get_main_loop_timing(self,param0,param1):
-        logging.error("_emscripten_get_main_loop_timing not implemented")
-        return 
+    def _emscripten_get_main_loop_timing(self,mode,val):
+        if mode:
+            self.HEAP32[mode >> 2] = 1
+        if val:
+            self.HEAP32[val >> 2] = 1
     
     @logwrap
     def _emscripten_get_now(self):
@@ -2297,7 +2304,7 @@ class wasm_base:
     
     @logwrap
     def _emscripten_set_blur_callback_on_thread(self,param0,param1,param2,param3,param4):
-        logging.warning("_emscripten_set_blur_callback_on_thread not implemented -- ignored")
+        logging.warning("_emscripten_set_blur_callback_on_thread -- ignored")
         return 0
     
     @logwrap
@@ -2366,20 +2373,20 @@ class wasm_base:
         tid = len(self.threads)
         tid_event = threading.Event()
 
-        # def wrapper():
-        #     logging.info(f"thread - {tid} -- running")
-        #     self.dynCall_v(func) 
-
-        # self.threads[tid] = (wrapper, tid_event)
-
         def wrapper():
-            while not tid_event.is_set():
-                logging.info(f"thread - {tid} -- running")
-                self.dynCall_v(func) 
-                time.sleep(1)
+            logging.info(f"thread - {tid} -- running")
+            self.dynCall_v(func) 
 
-        threading.Timer(1, wrapper).start()
-        self.threads[tid] = tid_event
+        self.threads[tid] = (wrapper, tid_event)
+
+        # def wrapper():
+        #     while not tid_event.is_set():
+        #         logging.info(f"thread - {tid} -- running")
+        #         self.dynCall_v(func) 
+        #         time.sleep(1)
+
+        # threading.Timer(1, wrapper).start()
+        # self.threads[tid] = tid_event
         self.main_loop_tid  = tid
         return 
     
@@ -2573,27 +2580,27 @@ class wasm_base:
     
     @logwrap
     def _glActiveTexture(self,param0):
-        logging.warning("_glActiveTexture not implemented -- ignored")
+        logging.warning("_glActiveTexture -- ignored")
         return 
     
     @logwrap
     def _glAttachShader(self,param0,param1):
-        logging.warning("_glAttachShader not implemented -- ignored")
+        logging.warning("_glAttachShader -- ignored")
         return 
     
     @logwrap
     def _glBeginQuery(self,param0,param1):
-        logging.warning("_glBeginQuery not implemented -- ignored")
+        logging.warning("_glBeginQuery -- ignored")
         return 
     
     @logwrap
     def _glBeginTransformFeedback(self,param0):
-        logging.warning("_glBeginTransformFeedback not implemented -- ignored")
+        logging.warning("_glBeginTransformFeedback -- ignored")
         return 
     
     @logwrap
     def _glBindAttribLocation(self,param0,param1,param2):
-        logging.warning("_glBindAttribLocation not implemented -- ignored")
+        logging.warning("_glBindAttribLocation -- ignored")
         return 
     
     @logwrap
@@ -2605,72 +2612,72 @@ class wasm_base:
 
     @logwrap
     def _glBindBufferBase(self,param0,param1,param2):
-        logging.warning("_glBindBufferBase not implemented -- ignored")
+        logging.warning("_glBindBufferBase -- ignored")
         return 
     
     @logwrap
     def _glBindBufferRange(self,param0,param1,param2,param3,param4):
-        logging.warning("_glBindBufferRange not implemented -- ignored")
+        logging.warning("_glBindBufferRange -- ignored")
         return 
     
     @logwrap
     def _glBindFramebuffer(self,param0,param1):
-        logging.warning("_glBindFramebuffer not implemented -- ignored")
+        logging.warning("_glBindFramebuffer -- ignored")
         return 
     
     @logwrap
     def _glBindRenderbuffer(self,param0,param1):
-        logging.warning("_glBindRenderbuffer not implemented -- ignored")
+        logging.warning("_glBindRenderbuffer -- ignored")
         return 
     
     @logwrap
     def _glBindSampler(self,param0,param1):
-        logging.warning("_glBindSampler not implemented -- ignored")
+        logging.warning("_glBindSampler -- ignored")
         return 
     
     @logwrap
     def _glBindTexture(self,param0,param1):
-        logging.warning("_glBindTexture not implemented -- ignored")
+        logging.warning("_glBindTexture -- ignored")
         return 
     
     @logwrap
     def _glBindTransformFeedback(self,param0,param1):
-        logging.warning("_glBindTransformFeedback not implemented -- ignored")
+        logging.warning("_glBindTransformFeedback -- ignored")
         return 
     
     @logwrap
     def _glBindVertexArray(self,param0):
-        logging.warning("_glBindVertexArray not implemented -- ignored")
+        logging.warning("_glBindVertexArray -- ignored")
         return 
     
     @logwrap
     def _glBlendEquation(self,param0):
-        logging.warning("_glBlendEquation not implemented -- ignored")
+        logging.warning("_glBlendEquation -- ignored")
         return 
     
     @logwrap
     def _glBlendEquationSeparate(self,param0,param1):
-        logging.warning("_glBlendEquationSeparate not implemented -- ignored")
+        logging.warning("_glBlendEquationSeparate -- ignored")
         return 
     
     @logwrap
     def _glBlendFuncSeparate(self,param0,param1,param2,param3):
-        logging.warning("_glBlendFuncSeparate not implemented -- ignored")
+        logging.warning("_glBlendFuncSeparate -- ignored")
         return 
     
     @logwrap
     def _glBlitFramebuffer(self,param0,param1,param2,param3,param4,param5,param6,param7,param8,param9):
-        logging.warning("_glBlitFramebuffer not implemented -- ignored")
+        logging.warning("_glBlitFramebuffer -- ignored")
         return 
     
     @logwrap
     def _glBufferData(self,param0,param1,param2,param3):
-        logging.warning("_glBufferData not implemented -- ignored")
+        logging.warning("_glBufferData -- ignored")
         return 
     
     @logwrap
     def _glBufferSubData(self,param0,param1,param2,param3):
-        logging.warning("_glBufferSubData not implemented -- ignored")
+        logging.warning("_glBufferSubData -- ignored")
         return 
     
     @logwrap
@@ -2708,7 +2715,7 @@ class wasm_base:
     
     @logwrap
     def _glColorMask(self,param0,param1,param2,param3):
-        logging.warning("_glColorMask not implemented -- ignored")
+        logging.warning("_glColorMask -- ignored")
         return 
     
     @logwrap
@@ -2717,32 +2724,32 @@ class wasm_base:
     
     @logwrap
     def _glCompressedTexImage2D(self,param0,param1,param2,param3,param4,param5,param6,param7):
-        logging.warning("_glCompressedTexImage2D not implemented -- ignored")
+        logging.warning("_glCompressedTexImage2D -- ignored")
         return 
     
     @logwrap
     def _glCompressedTexSubImage2D(self,param0,param1,param2,param3,param4,param5,param6,param7,param8):
-        logging.warning("_glCompressedTexSubImage2D not implemented -- ignored")
+        logging.warning("_glCompressedTexSubImage2D -- ignored")
         return 
     
     @logwrap
     def _glCompressedTexSubImage3D(self,param0,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10):
-        logging.warning("_glCompressedTexSubImage3D not implemented -- ignored")
+        logging.warning("_glCompressedTexSubImage3D -- ignored")
         return 
     
     @logwrap
     def _glCopyBufferSubData(self,param0,param1,param2,param3,param4):
-        logging.warning("_glCopyBufferSubData not implemented -- ignored")
+        logging.warning("_glCopyBufferSubData -- ignored")
         return 
     
     @logwrap
     def _glCopyTexImage2D(self,param0,param1,param2,param3,param4,param5,param6,param7):
-        logging.warning("_glCopyTexImage2D not implemented -- ignored")
+        logging.warning("_glCopyTexImage2D -- ignored")
         return 
     
     @logwrap
     def _glCopyTexSubImage2D(self,param0,param1,param2,param3,param4,param5,param6,param7):
-        logging.warning("_glCopyTexSubImage2D not implemented -- ignored")
+        logging.warning("_glCopyTexSubImage2D -- ignored")
         return 
     
     @logwrap
@@ -2763,13 +2770,20 @@ class wasm_base:
     
     @logwrap
     def _glCullFace(self,param0):
-        logging.warning("_glCullFace not implemented -- ignored")
+        logging.warning("_glCullFace -- ignored")
         return 
     
     @logwrap
-    def _glDeleteBuffers(self,param0,param1):
-        logging.error("_glDeleteBuffers not implemented")
-        return 
+    def _glDeleteBuffers(self,n,buffers):
+        for i in range(n):
+            idx = self.HEAP32[(buffers + i * 4) // 4]
+            buffer = self.GL.buffers[idx]
+            
+            if buffer is None:
+                continue
+            
+            # Delete the buffer using the GL context
+            self.GL.buffers[idx] = None  # Clear the buffer from the GL buffers
     
     @logwrap
     def _glDeleteFramebuffers(self,param0,param1):
@@ -2797,14 +2811,16 @@ class wasm_base:
         return 
     
     @logwrap
-    def _glDeleteShader(self,param0):
-        logging.error("_glDeleteShader not implemented")
-        return 
+    def _glDeleteShader(self,idx):
+        if not idx:
+            return
+        self.GL.shaders[idx] = None
     
     @logwrap
-    def _glDeleteSync(self,param0):
-        logging.error("_glDeleteSync not implemented")
-        return 
+    def _glDeleteSync(self,idx):
+        if not idx:
+            return
+        self.GL.syncs[idx] = None
     
     @logwrap
     def _glDeleteTextures(self,param0,param1):
@@ -2823,22 +2839,22 @@ class wasm_base:
     
     @logwrap
     def _glDepthFunc(self,param0):
-        logging.warning("_glDepthFunc not implemented -- ignored")
+        logging.warning("_glDepthFunc -- ignored")
         return 
     
     @logwrap
     def _glDepthMask(self,param0):
-        logging.warning("_glDepthMask not implemented -- ignored")
+        logging.warning("_glDepthMask -- ignored")
         return 
     
     @logwrap
     def _glDetachShader(self,param0,param1):
-        logging.warning("_glDetachShader not implemented -- ignored")
+        logging.warning("_glDetachShader -- ignored")
         return 
     
     @logwrap
     def _glDisable(self,param0):
-        logging.warning("_glDisable not implemented -- ignored")
+        logging.warning("_glDisable -- ignored")
         return 
     
     @logwrap
@@ -2847,12 +2863,12 @@ class wasm_base:
     
     @logwrap
     def _glDrawArrays(self,param0,param1,param2):
-        logging.warning("_glDrawArrays not implemented -- ignored")
+        logging.warning("_glDrawArrays -- ignored")
         return 
     
     @logwrap
     def _glDrawArraysInstanced(self,param0,param1,param2,param3):
-        logging.warning("_glDrawArraysInstanced not implemented -- ignored")
+        logging.warning("_glDrawArraysInstanced -- ignored")
         return 
     
     @logwrap
@@ -2885,17 +2901,16 @@ class wasm_base:
     
     @logwrap
     def _glFenceSync(self,condition, flags):
-        logging.error("_glFenceSync not implemented")
-        return 0
-        # sync = self.GLctx_fenceSync[(condition, flags)]
-        # if sync:
-        #     idx = self.GL.getNewId(self.GL.syncs)
-        #     sync['name'] = idx
-        #     self.GL.syncs[idx] = sync
-        #     return idx
-        # else:
-        #     return 0 
+        sync = self.GL.ctx_fenceSync(condition, flags)
         
+        if sync:
+            id = self.GL.getNewId(self.GL.syncs)
+            sync['name'] = id
+            self.GL.syncs[id] = sync 
+            return id
+        else:
+            return 0
+                
     
     @logwrap
     def _glFinish(self):
@@ -3010,9 +3025,30 @@ class wasm_base:
         return 
     
     @logwrap
-    def _glGetActiveUniform(self,param0,param1,param2,param3,param4,param5,param6):
-        logging.error("_glGetActiveUniform not implemented")
-        return 
+    def _glGetActiveUniform(self,program, index, bufSize, length, size, _type, name):
+        program = self.GL.programs[program]
+        if not program:
+            return
+        
+        info = self.GL.ctx_getActiveUniform(program, index)
+        if not info:
+            return
+        
+        if bufSize > 0 and name:
+            # Assuming 'name' is a byte buffer, so we use slicing
+            numBytesWrittenExclNull = self.stringToUTF8(info['name'], name, bufSize)
+            if length:
+                self.HEAP32[length >> 2] = numBytesWrittenExclNull
+        else:
+            if length:
+                self.HEAP32[length >> 2] = 0
+        
+        if size:
+            self.HEAP32[size >> 2] = info['size']
+        
+        if _type:
+            self.HEAP32[_type >> 2] = info['type']
+
     
     @logwrap
     def _glGetActiveUniformBlockName(self,param0,param1,param2,param3,param4):
@@ -3087,9 +3123,53 @@ class wasm_base:
         return 
     
     @logwrap
-    def _glGetProgramiv(self,param0,param1,param2):
-        logging.error("_glGetProgramiv not implemented")
-        return 
+    def _glGetProgramiv(self,program, pname, p):
+        if not p:
+            self.GL.lastError = 1281
+            return
+        
+        if program >= self.GL.counter:
+            self.GL.lastError = 1281
+            return
+        
+        ptable = self.GL.programInfos.get(program)
+        if not ptable:
+            self.GL.lastError = 1282
+            return
+
+        if pname == 35716:  # Program info log length
+            log = self.GL.ctx_getProgramInfoLog(self.GL.programs[program])
+            if log is None:
+                log = "(unknown error)"
+            self.HEAP32[p >> 2] = len(log) + 1
+        
+        elif pname == 35719:  # Max uniform length
+            self.HEAP32[p >> 2] = ptable.get('maxUniformLength', 0)
+        
+        elif pname == 35722:  # Max attribute length
+            if ptable.get('maxAttributeLength', -1) == -1:
+                program_obj = self.GL.programs[program]
+                ACTIVE_ATTRIBUTES=  35721
+                numAttribs = self.GL.ctx_getProgramParameter(program_obj, ACTIVE_ATTRIBUTES)
+                ptable['maxAttributeLength'] = 0
+                for i in range(numAttribs):
+                    activeAttrib = self.GL.ctx_getActiveAttrib(program_obj, i)
+                    ptable['maxAttributeLength'] = max(ptable['maxAttributeLength'], len(activeAttrib.name) + 1)
+            self.HEAP32[p >> 2] = ptable['maxAttributeLength']
+        
+        elif pname == 35381:  # Max uniform block name length
+            if ptable.get('maxUniformBlockNameLength', -1) == -1:
+                program_obj = self.GL.programs[program]
+                ACTIVE_UNIFORM_BLOCKS =35382
+                numBlocks = self.GL.ctx_getProgramParameter(program_obj, ACTIVE_UNIFORM_BLOCKS)
+                ptable['maxUniformBlockNameLength'] = 0
+                for i in range(numBlocks):
+                    activeBlockName = self.GL.ctx_getActiveUniformBlockName(program_obj, i)
+                    ptable['maxUniformBlockNameLength'] = max(ptable['maxUniformBlockNameLength'], len(activeBlockName) + 1)
+            self.HEAP32[p >> 2] = ptable['maxUniformBlockNameLength']
+        
+        else:
+            self.HEAP32[p >> 2] = self.GL.ctx_getProgramParameter(self.GL.programs[program], pname)
     
     @logwrap
     def _glGetRenderbufferParameteriv(self,param0,param1,param2):
@@ -3112,9 +3192,25 @@ class wasm_base:
         return 
     
     @logwrap
-    def _glGetShaderiv(self,param0,param1,param2):
-        logging.error("_glGetShaderiv not implemented")
-        return 
+    def _glGetShaderiv(self,shader, pname, p):
+        if not p:
+            self.GL.lastError = 1280
+            return
+        
+        if pname == 35716:  # Shader info log length
+            log = self.GLctx.getShaderInfoLog(self.GL.shaders[shader])
+            if log is None:
+                log = "(unknown error)"
+            self.HEAP32[p >> 2] = len(log) + 1
+        
+        elif pname == 35720:  # Shader source length
+            source = self.GL.ctx_getShaderSource(self.GL.shaders[shader])
+            sourceLength = 0 if source is None or len(source) == 0 else len(source) + 1
+            self.HEAP32[p >> 2] = sourceLength
+        
+        else:  # Shader parameter
+            parameter = self.GL.ctx_getShaderParameter(self.GL.shaders[shader], pname)
+            self.HEAP32[p >> 2] = int(parameter)
     
     @logwrap
     def _glGetString(self,name_):
@@ -3215,9 +3311,34 @@ class wasm_base:
         return 
     
     @logwrap
-    def _glGetUniformLocation(self,param0,param1):
-        logging.error("_glGetUniformLocation not implemented")
-        return 0
+    def _glGetUniformLocation(self,program, _name):
+        name = self.Pointer_stringify(_name)
+        arrayOffset = 0
+
+        # Check if the name ends with "]" (array notation)
+        if name.endswith("]"):
+            ls = name.rfind("[")
+            arrayIndex = name[ls + 1: -1]  # Get the index inside the brackets
+            if arrayIndex:
+                arrayOffset = int(arrayIndex)
+                if arrayOffset < 0:
+                    return -1
+            name = name[:ls]  # Get the base name (before the bracket)
+
+        # Retrieve the program info (ptable)
+        ptable = self.GL.programInfos.get(program)
+        if not ptable:
+            return -1
+
+        # Retrieve the uniform table (utable) and the uniform information
+        utable = ptable['uniforms']
+        uniformInfo = utable.get(name)
+
+        # Check if the uniform info exists and if the array offset is within bounds
+        if uniformInfo and arrayOffset < uniformInfo[0]:
+            return uniformInfo[1] + arrayOffset
+        else:
+            return -1
     
     @logwrap
     def _glGetUniformiv(self,param0,param1,param2):
@@ -3231,7 +3352,7 @@ class wasm_base:
     
     @logwrap
     def _glInvalidateFramebuffer(self,param0,param1,param2):
-        logging.error("_glInvalidateFramebuffer not implemented")
+        logging.warning("_glInvalidateFramebuffer -- ignored")
         return 
     
     @logwrap
@@ -3245,9 +3366,49 @@ class wasm_base:
         return 0
     
     @logwrap
-    def _glLinkProgram(self,param0):
-        logging.error("_glLinkProgram not implemented")
-        return 
+    def _glLinkProgram(self,program):
+        p = self.GL.programs[program]
+        self.GL.programInfos[program] = {
+            'uniforms': {},
+            'maxUniformLength': 0,
+            'maxAttributeLength': -1,
+            'maxUniformBlockNameLength': -1
+        }
+
+        ptable = self.GL.programInfos[program]
+        utable = ptable['uniforms']
+        
+        # Get the number of active uniforms in the program
+        ACTIVE_UNIFORMS = 35718
+        numUniforms = self.GL.ctx_getProgramParameter(p, ACTIVE_UNIFORMS)
+
+        for i in range(numUniforms):
+            u = self.GL.ctx_getActiveUniform(p, i)
+            name = u['name']
+            ptable['maxUniformLength'] = max(ptable['maxUniformLength'], len(name) + 1)
+            
+            # Handle array uniforms
+            if name.endswith("]"):
+                ls = name.rfind("[")
+                name = name[:ls]
+
+            loc = self.GL.ctx_getUniformLocation(p, name)
+            
+            if loc is not None:
+                # Add the uniform location to the table
+                idx = self.GL.getNewId(self.GL.uniforms)
+                utable[name] = [u['size'], idx]
+                self.GL.uniforms[idx] = loc
+                
+                # Handle array elements if size > 1
+                for j in range(1, u['size']):
+                    n = f"{name}[{j}]"
+                    loc = self.GL.ctx_getUniformLocation(p, n)
+                    idx = self.GL.getNewId(self.GL.uniforms)
+                    self.GL.uniforms[idx] = loc
+
+        
+        return
     
     @logwrap
     def _glMapBufferRange(self,param0,param1,param2,param3):
@@ -3264,7 +3425,7 @@ class wasm_base:
     
     @logwrap
     def _glPolygonOffset(self,param0,param1):
-        logging.warning("_glPolygonOffset not implemented -- ignored")
+        logging.warning("_glPolygonOffset -- ignored")
         return 
     
     @logwrap
@@ -3304,37 +3465,37 @@ class wasm_base:
     
     @logwrap
     def _glScissor(self,param0,param1,param2,param3):
-        logging.error("_glScissor not implemented")
+        logging.warning("_glScissor -- ignored")
         return 
     
     @logwrap
     def _glShaderSource(self,param0,param1,param2,param3):
-        logging.error("_glShaderSource not implemented")
+        logging.warning("_glShaderSource -- ignored")
         return 
     
     @logwrap
     def _glStencilFuncSeparate(self,param0,param1,param2,param3):
-        logging.warning("_glStencilFuncSeparate not implemented -- ignored")
+        logging.warning("_glStencilFuncSeparate -- ignored")
         return 
     
     @logwrap
     def _glStencilMask(self,param0):
-        logging.warning("_glStencilMask not implemented -- ignored")
+        logging.warning("_glStencilMask -- ignored")
         return 
     
     @logwrap
     def _glStencilOpSeparate(self,param0,param1,param2,param3):
-        logging.warning("_glStencilOpSeparate not implemented -- ignored")
+        logging.warning("_glStencilOpSeparate -- ignored")
         return 
     
     @logwrap
     def _glTexImage2D(self,param0,param1,param2,param3,param4,param5,param6,param7,param8):
-        logging.warning("_glTexImage2D not implemented -- ignored")
+        logging.warning("_glTexImage2D -- ignored")
         return 
     
     @logwrap
     def _glTexImage3D(self,param0,param1,param2,param3,param4,param5,param6,param7,param8,param9):
-        logging.warning("_glTexImage3D not implemented -- ignored")
+        logging.warning("_glTexImage3D -- ignored")
         return 
     
     @logwrap
@@ -3353,37 +3514,35 @@ class wasm_base:
     
     @logwrap
     def _glTexStorage2D(self,param0,param1,param2,param3,param4):
-        logging.warning("_glTexStorage2D not implemented -- ignored")
+        logging.warning("_glTexStorage2D -- ignored")
         return 
     
     @logwrap
     def _glTexStorage3D(self,param0,param1,param2,param3,param4,param5):
-        logging.warning("_glTexStorage3D not implemented -- ignored")
+        logging.warning("_glTexStorage3D -- ignored")
         return 
     
     @logwrap
     def _glTexSubImage2D(self,param0,param1,param2,param3,param4,param5,param6,param7,param8):
-        logging.warning("_glTexSubImage2D not implemented -- ignored")
+        logging.warning("_glTexSubImage2D -- ignored")
         return 
     
     @logwrap
     def _glTexSubImage3D(self,param0,param1,param2,param3,param4,param5,param6,param7,param8,param9,param10):
-        logging.warning("_glTexSubImage3D not implemented -- ignored")
+        logging.warning("_glTexSubImage3D -- ignored")
         return 
     
     @logwrap
     def _glTransformFeedbackVaryings(self,param0,param1,param2,param3):
-        logging.warning("_glTransformFeedbackVaryings not implemented -- ignored")
+        logging.warning("_glTransformFeedbackVaryings -- ignored")
         return 
     
     @logwrap
     def _glUniform1fv(self,param0,param1,param2):
-        logging.error("_glUniform1fv not implemented")
         return 
     
     @logwrap
     def _glUniform1i(self,param0,param1):
-        logging.error("_glUniform1i not implemented")
         return 
     
     @logwrap
@@ -3428,7 +3587,6 @@ class wasm_base:
     
     @logwrap
     def _glUniform4fv(self,param0,param1,param2):
-        logging.error("_glUniform4fv not implemented")
         return 
     
     @logwrap
@@ -3463,7 +3621,7 @@ class wasm_base:
     
     @logwrap
     def _glUseProgram(self,param0):
-        logging.warning("_glUseProgram not implemented -- ignored")
+        logging.warning("_glUseProgram -- ignored")
         return 
     
     @logwrap
@@ -3488,12 +3646,11 @@ class wasm_base:
     
     @logwrap
     def _glVertexAttribPointer(self,param0,param1,param2,param3,param4,param5):
-        logging.error("_glVertexAttribPointer not implemented")
         return 
     
     @logwrap
     def _glViewport(self,param0,param1,param2,param3):
-        logging.error("_glViewport not implemented")
+        logging.warning("_glViewport -- ignored")
         return 
     
     @logwrap
@@ -3678,7 +3835,7 @@ class wasm_base:
     
     @logwrap
     def _pthread_key_delete(self,param0):
-        logging.warning("_pthread_key_delete not implemented -- ignored")
+        logging.warning("_pthread_key_delete -- ignored")
         return 0
     
     @logwrap
@@ -4205,9 +4362,8 @@ class wasm_base:
     
     @logwrap
     def _glClientWaitSync(self,param0,param1,param2,param3):
-        logging.error("_glClientWaitSync not implemented")
-        return 0
-
+        logging.warning("_glClientWaitSync -- ignored")
+        return 37146
 
     def emscriptenWebGLGet(self, name_, p, type):
         if not p:   

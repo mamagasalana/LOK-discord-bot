@@ -5,6 +5,7 @@ from pathlib import Path
 import io
 import logging
 import codecs
+import json
 
 class customWebSocket(websocket.WebSocketApp):
     def __init__(self, *args, **kwargs):
@@ -318,10 +319,12 @@ class GL:
         self.lastError = 0
         self.stringCache = {}
         self.stringiCache = {}
+        self.programInfos = {}
 
         self.contexts = []
         self.buffers = []
         self.programs = []
+        self.uniforms = []
         self.shaders = []
         self.queries = []
         self.samplers = []
@@ -447,6 +450,65 @@ class GL:
             
         return ret
     
+    def ctx_getProgramParameter(self, *args):
+        ref = {
+            35714: True,
+            35382: 0,
+            (36, 35718): 11,
+            (75, 35718): 5,
+        }
+
+        ret = 0
+        if (args[0]['name'], args[-1]) in ref:
+            return ref[(args[0]['name'], args[-1])]
+        else:
+            if not args[-1] in ref:
+                logging.error(f'ctx_getProgramParameter {args} not found')
+            return ref.get(args[-1], ret)
+    
+    def ctx_getUniformLocation(self, *args):
+        return {}
+    
+    def ctx_fenceSync(self, *args):
+        return {}
+    
+    def ctx_getShaderParameter(self, *args):
+        ref = {
+            35713: True,
+        }
+        return ref[args[-1]]
+
+    def ctx_getShaderSource(self, *args):
+        logging.error('ctx getShaderSource not implemented')
+
+    def ctx_getActiveAttrib(self, *args):
+        logging.error('ctx_getActiveAttrib not implemented')
+
+    def ctx_getActiveUniform(self, *args):
+        ref = {}
+        ref[36] = [{'size': 1, 'type': 35666, 'name': '_ScreenParams'},
+            {'size': 4, 'type': 35666, 'name': 'hlslcc_mtx4x4unity_ObjectToWorld[0]'},
+            {'size': 4, 'type': 35666, 'name': 'hlslcc_mtx4x4glstate_matrix_projection[0]'},
+            {'size': 4, 'type': 35666, 'name': 'hlslcc_mtx4x4unity_MatrixVP[0]'},
+            {'size': 1, 'type': 35666, 'name': '_Color'},
+            {'size': 1, 'type': 35666, 'name': '_ClipRect'},
+            {'size': 1, 'type': 35666, 'name': '_MainTex_ST'},
+            {'size': 1, 'type': 5126, 'name': '_UIMaskSoftnessX'},
+            {'size': 1, 'type': 5126, 'name': '_UIMaskSoftnessY'},
+            {'size': 1, 'type': 35666, 'name': '_TextureSampleAdd'},
+            {'size': 1, 'type': 35678, 'name': '_MainTex'},]
+        
+        ref[75] = [
+             {'size': 4, 'type': 35666, 'name': 'hlslcc_mtx4x4unity_ObjectToWorld[0]'},
+             {'size': 4, 'type': 35666, 'name': 'hlslcc_mtx4x4unity_MatrixVP[0]'},
+             {'size': 1, 'type': 35666, 'name': '_MainTex_ST'},
+             {'size': 1, 'type': 35666, 'name': '_Color'},
+             {'size': 1, 'type': 35678, 'name': '_MainTex'},]
+        
+        return ref[args[0]['name']][args[-1]]
+    
+    def ctx_getActiveUniformBlockName(self, *args):
+        logging.error('ctx_getActiveUniformBlockName not implemented')
 
     def ctx_setTexParameter(self, target, pname, params):
         self.text_param[(target, pname)] = params

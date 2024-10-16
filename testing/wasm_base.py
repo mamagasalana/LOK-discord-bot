@@ -865,8 +865,9 @@ class wasm_base:
 
     def custom_thread(self):
         while True:
+            tmp = self.threads.copy()
             time.sleep(1)
-            for func, env in self.threads.values():
+            for func, env in tmp.values():
                 if not env.is_set():
                     func()
                 time.sleep(1)
@@ -1124,7 +1125,6 @@ class wasm_base:
     
     @logwrap
     def _JS_Video_EnableAudioTrack(self,param0,param1,param2):
-        logging.error("_JS_Video_EnableAudioTrack not implemented")
         return 
     
     @logwrap
@@ -1139,8 +1139,7 @@ class wasm_base:
     
     @logwrap
     def _JS_Video_Height(self,param0):
-        logging.error("_JS_Video_Height not implemented")
-        return 0
+        return 1080
     
     @logwrap
     def _JS_Video_IsPlaying(self,param0):
@@ -1169,8 +1168,9 @@ class wasm_base:
         return 
     
     @logwrap
-    def _JS_Video_SetEndedHandler(self,param0,param1,param2):
-        logging.warning("_JS_Video_SetEndedHandler -- ignored")
+    def _JS_Video_SetEndedHandler(self,video, ref, onended):
+        self.videoInstances[video]['onendedCallback'] = onended
+        self.videoInstances[video]['onendedRef'] = ref
         return 
     
     @logwrap
@@ -1179,9 +1179,19 @@ class wasm_base:
         return 
     
     @logwrap
-    def _JS_Video_SetLoop(self,param0,param1):
-        logging.error("_JS_Video_SetLoop not implemented")
-        return 
+    def _JS_Video_SetLoop(self,video,loop):
+        if loop:
+            onendedCallback = self.videoInstances[video]['onendedCallback']
+            ref = self.videoInstances[video]['onendedRef'] 
+            if onendedCallback:
+                tid = len(self.threads)
+                tid_event = threading.Event()
+
+                def wrapper():
+                    self.dynCall_vi(onendedCallback, ref)
+                    tid_event.set()
+                
+                self.threads[tid] = (wrapper, tid_event)
     
     @logwrap
     def _JS_Video_SetMute(self,param0,param1):
@@ -1190,7 +1200,6 @@ class wasm_base:
     
     @logwrap
     def _JS_Video_SetPlaybackRate(self,param0,param1):
-        logging.error("_JS_Video_SetPlaybackRate not implemented")
         return 
     
     @logwrap
@@ -1220,8 +1229,7 @@ class wasm_base:
     
     @logwrap
     def _JS_Video_Width(self,param0):
-        logging.error("_JS_Video_Width not implemented")
-        return 0
+        return 1920
     
     @logwrap
     def _JS_WebCamVideo_CanPlay(self,param0):
@@ -1293,13 +1301,19 @@ class wasm_base:
         return rpcid
     
     @logwrap
-    def _JS_WebRequest_GetResponseHeaders(self,param0,param1,param2):
-        logging.error("_JS_WebRequest_GetResponseHeaders not implemented")
-        return 0
+    def _JS_WebRequest_GetResponseHeaders(self,rpcid, buffer, bufferSize):
+        headersraw = self.rpcs[rpcid]['response'].headers
+        headerstr = []
+        for k , v in sorted(headersraw.items()):
+            headerstr.append(f'{k.lower()}: {v}\r\n')
+        headers = ''.join(headerstr)
+        if buffer:
+            self.stringToUTF8(headers, buffer, bufferSize)
+        return self.lengthBytesUTF8(headers)
     
     @logwrap
-    def _JS_WebRequest_Release(self,param0):
-        logging.error("_JS_WebRequest_Release not implemented")
+    def _JS_WebRequest_Release(self,rpcid):
+        self.rpcs[rpcid] = None
         return 
     
     @logwrap
@@ -1339,17 +1353,24 @@ class wasm_base:
         details = self.rpcs[rpcid]
 
         def callback(response, *args, **kwargs):
-            kWebRequestOK = 0  # Placeholder for WebRequest status
+            tid = len(self.threads)
+            tid_event = threading.Event()
+            self.rpcs[rpcid]['response'] = response
 
-            if response.content:
-                # Allocate memory buffer for the response content
-                buffer_size = len(response.content)
-                buffer = self._malloc(buffer_size)
-                logging.info(f"_JS_WebRequest_SetResponseHandler done {buffer}")
-                self.HEAP8[buffer:buffer+buffer_size] = np.frombuffer(response.content, dtype=np.uint8)
-                self.dynCall_viiiiii(onresponse, arg, response.status, buffer, buffer_size, 0, kWebRequestOK)
-            else:
-                self.dynCall_viiiiii(onresponse, arg, response.status, 0, 0, 0, kWebRequestOK)
+            def wrapper():
+                if response.content:
+                    buffer_size = len(response.content)
+                    buffer = self._malloc(buffer_size)
+                    logging.info(f"_JS_WebRequest_SetResponseHandler done {buffer}")
+                    self.HEAP8[buffer:buffer+buffer_size] = np.frombuffer(response.content, dtype=np.uint8)
+                    self.dynCall_viiiiii(onresponse, arg, response.status_code, buffer, buffer_size, 0, 0)
+                    
+                else:
+                    self.dynCall_viiiiii(onresponse, arg, response.status_code, 0, 0, 0, 0)
+                
+                tid_event.set()
+            
+            self.threads[tid] = (wrapper, tid_event)
 
         details['callback'] = {'response': callback}
         return 

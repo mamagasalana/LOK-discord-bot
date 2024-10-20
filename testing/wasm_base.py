@@ -15,11 +15,11 @@ from requests_futures.sessions import FuturesSession
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'testing')))
 
-from websocketmanager import customWebSocket, JSSYS,ERRNO_CODES, FS, ASM_CONSTS, UTF8ArrayToString, CANVAS, GL, JSException
+from websocketmanager import customWebSocket, JSSYS,ERRNO_CODES, FS, ASM_CONSTS, UTF8ArrayToString, CANVAS, GL, JSException, WebSocketClientManager
 
 # HEAP32_DEBUG= [5914000, 5913988, 5913980, 5913984, 5914448, 5914456] 
 # HEAP32_DEBUG_FULL = HEAP32_DEBUG + [5914000,  5202024, 5949232, 5084484, 5913996, 5949244, 5271560, 5271564, 5271108, 18729848, 18730008, ]
-HEAP32_DEBUG=  [4199612, 5940696,5950592, 5950900, 5949536, 12768780, 30976960, 5914040, 5949364, 5914048,5913976, 5913992, 5913996, 5914000]
+HEAP32_DEBUG=  [5917318, 4199612, 5940696,5950592, 5950900, 5949536, 12768780, 30976960, 5914040, 5949364, 5914048,5913976, 5913992, 5913996, 5914000]
 # HEAP64_DEBUG= [30981832, 30997976]
 HEAP64_DEBUG = []
 
@@ -40,7 +40,13 @@ def logwrap(func):
                 log_wasm(k ,v)
             
             self.func_stack = {}
-        
+
+        if HEAP32_DEBUG:
+            out = {x: int(self.HEAP32[x//4]) for x in HEAP32_DEBUG}
+            log_msg += f" ||| {out}"
+        if self.START_DEBUG:
+            logging.info(log_msg)
+
         try:
             ret =  func(self, *args, **kwargs)
         except Exception as e:
@@ -55,7 +61,7 @@ def logwrap(func):
         log_msg += f" ||| return {ret}"
         debug=False
         if not 'invoke' in func.__name__ and not func.__name__ in ['_atomic_fetch_add_8', 'getTotalMemory']:
-            debug=True
+            debug=False
 
         if HEAP64_DEBUG and debug:
             out = {x: int(self.HEAP64[x//8]) for x in HEAP64_DEBUG}
@@ -74,7 +80,7 @@ def logwrap(func):
 
 class wasm_base:
     def __init__(self):
-        self.START_DEBUG=True
+        self.START_DEBUG=False
 
         self.ENV = {}
         self.GETENV_RET = {}
@@ -135,9 +141,9 @@ class wasm_base:
         self.Module_no_exit_runtime= True
         self.func_wrappers = {}                                                                 
         self.threads ={}
-        t = threading.Timer(1, self.custom_thread )
-        t.start()
-
+        # t = threading.Timer(1, self.custom_thread )
+        # t.start()
+        self.ws = WebSocketClientManager(self)
         self.main_loop_tid =None
 
         self.videoInstances  = {}
@@ -864,7 +870,10 @@ class wasm_base:
         return sig_cache[func]
 
     def custom_thread(self):
+        loop_count = 0
         while True:
+            logging.info(f'custom_thread {loop_count}')
+            loop_count +=1
             tmp = self.threads.copy()
             time.sleep(1)
             for func, env in tmp.values():
@@ -1219,13 +1228,15 @@ class wasm_base:
     
     @logwrap
     def _JS_Video_Time(self,param0):
-        logging.error("_JS_Video_Time not implemented")
-        return 0
+        logging.warning("_JS_Video_Time -- ignored")
+        return 5.0
     
     @logwrap
-    def _JS_Video_UpdateToTexture(self,param0,param1):
-        logging.error("_JS_Video_UpdateToTexture not implemented")
-        return 0
+    def _JS_Video_UpdateToTexture(self,video,tex):
+        buffer=  {'arr': [], 'type': 'texture'}
+        buffer['name'] = tex
+        self.GL.textures[tex] = buffer
+        return 1
     
     @logwrap
     def _JS_Video_Width(self,param0):
@@ -4453,15 +4464,15 @@ class wasm_base:
             raise ValueError(f"internal glGet error, bad type: {type}")
         
     def log(self, param0):
-        return
+        # return
         out = {}
         for idx in HEAP32_DEBUG:
-            out[idx] =  self.HEAP32[idx//4]
-        logging.info(f"from custom log: {param0} ||| {out.items()}"  )
+            out[idx] =  int(self.HEAP32[idx//4])
+        logging.info(f"from custom log: {param0} ||| {out}"  )
         return
 
     def log2(self, funcname, placeholder, logval):
-        return
+        # return
         if self.func_stack and funcname not in self.func_stack:
             for k, v in self.func_stack.items():
                 log_wasm(k ,v)

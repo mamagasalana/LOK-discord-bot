@@ -13,6 +13,7 @@ class LOK_JS2PY(wasm_base):
     def __init__(self, wasmfile= "testing/js_testing/test2.wasm"):
         super().__init__()
         if 1:
+            self.wasmfile = wasmfile
             self.config = Config()
             self.config.wasm_multi_value = True
             self.engine = Engine()
@@ -54,7 +55,7 @@ class LOK_JS2PY(wasm_base):
 
             self.instance = Instance(self.store, self.wasm_module, wasm_args)
             self.export_wasm_func()
-            self.ws = WebSocketClientManager(self)
+            
 
             self.tm_timezone = 5948960
             # self.tm_timezone= self.allocate(self.intArrayFromString("GMT"), "i8", self.ALLOC_STATIC)
@@ -589,9 +590,11 @@ class LOK_JS2PY(wasm_base):
                 "invoke_vijii": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], []), self.invoke_vijii),
                 "_atomic_fetch_add_8": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._atomic_fetch_add_8),
                 "_glClientWaitSync": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32(),ValType.i32()], [ValType.i32()]), self._glClientWaitSync),
-                # "log": Func(self.store, FuncType([ValType.i32()], []), self.log),
-                # "log2": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self.log2),
         }}
+        
+        if not 'test.wasm' in self.wasmfile:
+            self.import_object['env'].update({"log": Func(self.store, FuncType([ValType.i32()], []), self.log),
+                    "log2": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self.log2),})
 
     def export_wasm_func(self):
         self.__growWasmMemory = partial(self.instance.exports(self.store)["__growWasmMemory"], self.store)

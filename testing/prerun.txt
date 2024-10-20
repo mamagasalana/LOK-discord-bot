@@ -1,0 +1,74 @@
+script = document.createElement('script');
+script.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js";
+script.type = "text/javascript";
+document.head.appendChild(script);
+
+# Run this in debug console
+arrayBuffer = HEAP8.buffer.slice(0, HEAP8.length); 
+blob = new Blob([arrayBuffer], { type: "application/octet-stream" });
+link = document.createElement("a");
+link.href = URL.createObjectURL(blob);
+link.download = "heap8.bin";
+document.body.appendChild(link);
+
+(async function downloadFilesystemAsZip() {
+    const zip = new JSZip();
+
+    function addDirectoryToZip(zip, path) {
+        try {
+            // Get files and directories at the given path
+            const items = FS.readdir(path);
+
+            items.forEach(item => {
+                // Ignore '.' and '..'
+                if (item === '.' || item === '..') return;
+
+                const fullPath = path + '/' + item;
+                
+                try {
+                    if (FS.isDir(FS.lookupPath(fullPath).node.mode)) {
+                        // Recursively add directories
+                        addDirectoryToZip(zip, fullPath);
+                    } else {
+                        // Read the file as binary data
+                        const fileData = FS.readFile(fullPath, { encoding: 'binary' });
+                        const uint8Array = new Uint8Array(fileData);
+
+                        // Only add files with actual data
+                        if (uint8Array.length > 0) {
+                            console.log(`Adding file: ${fullPath}, Size: ${uint8Array.length} bytes`);
+                            zip.file(fullPath.substring(1), uint8Array);
+                        } else {
+                            console.log(`Skipping empty file: ${fullPath}`);
+                        }
+                    }
+                } catch (e) {
+                    console.error(`Error reading file or directory: ${fullPath}`, e);
+                }
+            });
+        } catch (e) {
+            console.error(`Error reading directory: ${path}`, e);
+        }
+    }
+
+    try {
+        addDirectoryToZip(zip, '/');
+    } catch (e) {
+        console.error('Error while adding directories to ZIP:', e);
+        return;
+    }
+
+    try {
+        // Generate the ZIP file and download it correctly
+        const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = 'filesystem.zip';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+    } catch (e) {
+        console.error('Error generating or downloading the ZIP file:', e);
+    }
+})();

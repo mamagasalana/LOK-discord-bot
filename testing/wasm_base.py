@@ -19,7 +19,7 @@ from websocketmanager import customWebSocket, JSSYS,ERRNO_CODES, FS, ASM_CONSTS,
 
 # HEAP32_DEBUG= [5914000, 5913988, 5913980, 5913984, 5914448, 5914456] 
 # HEAP32_DEBUG_FULL = HEAP32_DEBUG + [5914000,  5202024, 5949232, 5084484, 5913996, 5949244, 5271560, 5271564, 5271108, 18729848, 18730008, ]
-HEAP32_DEBUG=  [5917318, 4199612, 5940696,5950592, 5950900, 5949536, 12768780, 30976960, 5914040, 5949364, 5914048,5913976, 5913992, 5913996, 5914000]
+HEAP32_DEBUG=  [279384080 //4]
 # HEAP64_DEBUG= [30981832, 30997976]
 HEAP64_DEBUG = []
 
@@ -1502,18 +1502,41 @@ class wasm_base:
         return 0
     
     @logwrap
-    def _XHR_GetResponseHeaders(self,param0,param1):
-        logging.error("_XHR_GetResponseHeaders not implemented")
+    def _XHR_GetResponseHeaders(self,req, cb):
+        headers = ""
+        document_cookies = '_ga=GA1.1.233122233.1719228911; _fbp=fb.1.1719229032992.860882401663483744; G_ENABLED_IDPS=google; _ga_35RHDBY6XL=GS1.1.1720369980.25.0.1720369980.0.0.0; _ga_TXE7HGXVQ3=GS1.1.1729919620.154.1.1729921942.0.0.0; _ga_P5213Q3KXN=GS1.1.1729919620.153.1.1729921942.6.0.0'
+        cookies = document_cookies.split(";")  # Placeholder for document.cookie in Python
+
+        # Add cookies to headers
+        for cookie in cookies:
+            headers += "Set-Cookie: " + cookie.strip() + "\r\n"
+
+        additional_headers = {k: v for k, v in self.rpcs[req].result().headers.items() if k in ['Content-Type', 'Content-Length']}
+        additional_headers  =  [f'{k.lower()}={v}' for k,v in sorted(additional_headers.items())]
+        additional_headers2 = '\r\n'.join(additional_headers)
+        if additional_headers2:
+            headers += additional_headers2
+            headers += "\r\n"
+        
+        # Convert headers to byte array
+        byte_array =np.frombuffer(bytearray(headers, "utf-8"), dtype=np.uint8) 
+        buffer = self._malloc(len(byte_array))
+        self.HEAPU8[buffer:buffer + len(byte_array)] = byte_array
+        self.dynCall_viii(cb, req, buffer, len(byte_array))
+        self._free(buffer)
         return 
     
     @logwrap
-    def _XHR_GetStatusLine(self,param0,param1):
-        logging.error("_XHR_GetStatusLine not implemented")
-        return 
+    def _XHR_GetStatusLine(self,req, cb):
+        status = f"HTTP/1.1 {self.rpcs[req].result().status_code} "
+        byteArray = np.frombuffer(bytearray(status, "utf-8"), dtype=np.uint8)
+        buffer = self._malloc(len(byteArray))
+        self.HEAPU8[buffer: buffer+len(byteArray)] = byteArray
+        self.dynCall_viii(cb, req, buffer, len(byteArray))
+        self._free(buffer)
     
     @logwrap
     def _XHR_Release(self,param0):
-        logging.error("_XHR_Release not implemented")
         return 
     
     @logwrap
@@ -2284,6 +2307,8 @@ class wasm_base:
     
     @logwrap
     def _emscripten_get_now(self):
+        logging.warning("modified for decryption testing")
+        return datetime.datetime(2024,10,26, 8,44).timestamp()*1000 - datetime.datetime(2024,10,26, 8,42).timestamp()*1000
         return time.time()*1000 - self.init_time
     
     @logwrap

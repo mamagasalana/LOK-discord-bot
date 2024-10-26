@@ -3,12 +3,16 @@ script.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js";
 script.type = "text/javascript";
 document.head.appendChild(script);
 
+#breakpoint filter
+#WS_Create
+e.data.includes("objects/v4")
+26,2001,406
+
 # Run this in debug console
-arrayBuffer = HEAP8.buffer.slice(0, HEAP8.length); 
-blob = new Blob([arrayBuffer], { type: "application/octet-stream" });
+blob = new Blob([HEAP8], { type: "application/octet-stream" });
 link = document.createElement("a");
 link.href = URL.createObjectURL(blob);
-link.download = "heap8.bin";
+link.download = "1.bin";
 document.body.appendChild(link);
 
 (async function downloadFilesystemAsZip() {

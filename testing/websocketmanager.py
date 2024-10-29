@@ -7,6 +7,9 @@ import logging
 import codecs
 import json
 
+class EarlyExit(Exception):
+    pass
+
 class customWebSocket(websocket.WebSocketApp):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

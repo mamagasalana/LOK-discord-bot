@@ -15,16 +15,24 @@ from requests_futures.sessions import FuturesSession
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'testing')))
 
-from websocketmanager import customWebSocket, JSSYS,ERRNO_CODES, FS, ASM_CONSTS, UTF8ArrayToString, CANVAS, GL, JSException, WebSocketClientManager
+from websocketmanager import customWebSocket, JSSYS,ERRNO_CODES, FS, ASM_CONSTS, UTF8ArrayToString, CANVAS, GL, JSException, WebSocketClientManager, EarlyExit
+HEAP8_DEBUG= []
+HEAP32_DEBUG=  [5950176, 235421712, 278425616, 278700048, 240476172, 279384080, 278491148, 235449756, 278453660, 278728092, 240532264, 279405110, 278533212]
+# HEAP32_DEBUG=  [240476172, 279384080, 278491148, 240532264, 279405110, 278533212]
+# [235421712, 278425616, 278700048]: decompressed without spaces
+# 240476172: decompressed with spaces
+# 279384080: objects without spaces
+# 278491148: objects with spaces
 
-# HEAP32_DEBUG= [5914000, 5913988, 5913980, 5913984, 5914448, 5914456] 
-# HEAP32_DEBUG_FULL = HEAP32_DEBUG + [5914000,  5202024, 5949232, 5084484, 5913996, 5949244, 5271560, 5271564, 5271108, 18729848, 18730008, ]
-HEAP32_DEBUG=  [279384080 //4]
-# HEAP64_DEBUG= [30981832, 30997976]
+# [235449756, 278453660, 278728092]: decompressed complete without spaces,
+# 240532264: decompressed complete with spaces,
+# 279405110: objects complete without spaces
+# 278533212: objects complete with spaces
+
 HEAP64_DEBUG = []
 
 def log_wasm(k,v):
-    logging.info(f"from funcname {k}, {v.items()}")
+    logging.info(f"from funcname {k}, {v}")
 
 def logwrap(func):
     @wraps(func)
@@ -44,15 +52,22 @@ def logwrap(func):
         if HEAP32_DEBUG:
             out = {x: int(self.HEAP32[x//4]) for x in HEAP32_DEBUG}
             log_msg += f" ||| {out}"
+            for k, v in self.debugref.items():
+                if v == out.get(k):
+                    self.debugref[k]= -999
+                    logging.info(f'{k} changed here')
+                    if k == 279405110:
+                        logging.info(log_msg)
+                        return
         if self.START_DEBUG:
             logging.info(log_msg)
 
         try:
             ret =  func(self, *args, **kwargs)
         except Exception as e:
-            with open('npbuffer.txt', 'wb') as ifile:
-                ifile.write(bytes(self.HEAP8))
-            if isinstance(e, JSException):
+            if isinstance(e, EarlyExit):
+                return
+            elif isinstance(e, JSException):
                 logging.error(f"'{func.__name__}' failed")
             else:    
                 logging.error(f"'{func.__name__}' failed", exc_info=True)
@@ -81,6 +96,18 @@ def logwrap(func):
 class wasm_base:
     def __init__(self):
         self.START_DEBUG=False
+        self.debugref ={235421712: 1717851478,
+            278425616: 1717851478,
+            278700048: 1717851478,
+            240476172: 5570646,
+            279384080: 1651450491,
+            278491148: 2228347,
+            235449756: 1027428674,
+            278453660: 1027428674,
+            278728092: 1027428674,
+            240532264: 3997757,
+            279405110: 2099403314,
+            278533212: 8192093}
 
         self.ENV = {}
         self.GETENV_RET = {}
@@ -2074,6 +2101,9 @@ class wasm_base:
     
     @logwrap
     def _syscall5(self,param0,varargs):
+        with open('after.bin', 'wb') as ofile:
+            ofile.write(bytes(self.HEAP8))
+        raise EarlyExit
         self.SYSCALLS.varargs = varargs
         try:
             pathname = self.SYSCALLS.getStr()
@@ -2630,7 +2660,9 @@ class wasm_base:
     
     @logwrap
     def _gettimeofday(self,ptr,param1):
+        logging.warning("modified for decryption testing")
         now = time.time()* 1e3
+        now = datetime.datetime(2024,10,26, 8,44).timestamp()*1000 
         self.HEAP32[ptr >> 2] = int(now / 1e3) 
         self.HEAP32[ptr + 4 >> 2] = int(now % 1e3 * 1e3) 
         return 0
@@ -4505,17 +4537,29 @@ class wasm_base:
             return self.log2(funcname, placeholder, logval)
         
         if funcname in self.func_stack:
-            if placeholder in self.func_stack[funcname] and placeholder not in HEAP32_DEBUG:
+            if placeholder in self.func_stack[funcname]:
                 log_wasm(funcname ,self.func_stack[funcname])
                 self.func_stack.pop(funcname)
                 return self.log2(funcname, placeholder, logval)
             else:
-                self.func_stack[funcname][placeholder] = logval    
+                self.func_stack[funcname][placeholder] = logval   
+                if placeholder == -1 and logval == -1:
+                    log_wasm(funcname ,self.func_stack[funcname])
+                    self.func_stack.pop(funcname)                 
         else:
             self.func_stack[funcname] = {}
             self.func_stack[funcname][placeholder] = logval
-            for idx in HEAP32_DEBUG:
-                self.func_stack[funcname][idx] =  self.HEAP32[idx//4]
+            out = {x: int(self.HEAP32[x//4]) for x in HEAP32_DEBUG}
+            for k, v in self.debugref.items():
+                if v == out.get(k):
+                    self.debugref[k]= -999
+                    logging.info(f'{k} changed here')
+
+            for idx in HEAP8_DEBUG:
+                self.func_stack[funcname][idx] = int( self.HEAP8[idx])
             
+            if placeholder == -1 and logval == -1:
+                log_wasm(funcname ,self.func_stack[funcname])
+                self.func_stack.pop(funcname)
 
         return

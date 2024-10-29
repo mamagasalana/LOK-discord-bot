@@ -597,6 +597,7 @@ class LOK_JS2PY(wasm_base):
                     "log2": Func(self.store, FuncType([ValType.i32(),ValType.i32(),ValType.i32()], []), self.log2),})
 
     def export_wasm_func(self):
+        self.decryption= partial(self.instance.exports(self.store)["_decryption"], self.store)
         self.__growWasmMemory = partial(self.instance.exports(self.store)["__growWasmMemory"], self.store)
         self.stackAlloc = partial(self.instance.exports(self.store)["stackAlloc"], self.store)
         self.stackSave = partial(self.instance.exports(self.store)["stackSave"], self.store)

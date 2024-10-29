@@ -24,6 +24,17 @@
             
         },
         {
+            "name": "sample_decrypt",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/testing/sample_decrypt.py",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "envFile": "${workspaceFolder}/.env",
+            "justMyCode": false
+            
+        },
+        {
             "name": "test",
             "type": "debugpy",
             "request": "launch",

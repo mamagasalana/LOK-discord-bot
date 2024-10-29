@@ -6,7 +6,8 @@ from config.config import DYNAMO_DB_NAME, USER, PASSWORD, LOGIN_URL, MAIL_URL
 import pytz
 from db.repository.user_personal_info_repository import UserPersonalInfoRepository
 from db.repository.user_game_info_repository import UserGameInfoRepository
-
+import base64
+import json
 
 class LokService:
     def __init__(self):
@@ -74,6 +75,22 @@ class LokService:
         ]
 
         return filtered_mails
+
+    def decryption(self, encrypted_text):
+        ret = base64.b64decode(encrypted_text)
+        decryption_key= [46, 101, 48, 120, 57, 49, 55, 97, 98, 51, 57, 49, 97, 50, 46]
+
+        decryption_key_length =len(decryption_key)
+        idx = 0
+        out= []
+
+        for value1 in ret:
+            tmp = idx % decryption_key_length
+            result = value1 ^ decryption_key[tmp]
+            idx += 1
+            out.append(result)
+
+        return json.loads(bytes(out))
 
     def get_kingdomid_by_xy(self):
         pass

@@ -8,7 +8,7 @@ from db.repository.user_personal_info_repository import UserPersonalInfoReposito
 from db.repository.user_game_info_repository import UserGameInfoRepository
 import base64
 import json
-from wasm_service import wasm_session
+from services.wasm_service import wasm_session
 
 class LokService:
     def __init__(self):
@@ -40,8 +40,8 @@ class LokService:
             logging.error("Token not found in the response: %s", response.json())
             raise ValueError("Token not found")
 
-        regionHash = response.json().get("regionHash")
-        self.salt = wasm_session.get_salt(regionHash)
+        self.regionHash = response.json().get("regionHash")
+        self.salt = wasm_session.get_salt(self.regionHash)
 
     @property
     def headers(self):

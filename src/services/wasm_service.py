@@ -1,10 +1,10 @@
 from wasmtime import Config, Store, Engine, Module, FuncType, Func, ValType, Instance, Limits, MemoryType, Global, GlobalType, Val, Memory, Table, TableType
 from functools import partial
 import numpy as np
-from wasmbase import wasm_base
+from services.wasmbase import wasm_base
 
 class wasm(wasm_base):
-    def __init__(self, wasmfile= "testing/js_testing/test.wasm"):
+    def __init__(self, wasmfile= "testing/js_testing/test6.wasm"):
         super().__init__()
     
         self.wasmfile = wasmfile
@@ -51,6 +51,7 @@ class wasm(wasm_base):
 
         # to get salt
         self.decryption = partial(self.instance.exports(self.store)["_decryption"], self.store)
+        self.before_decryption = partial(self.instance.exports(self.store)["_before_decryption"], self.store)
 
     def init_base_func(self):
         self.import_object = {
@@ -587,17 +588,21 @@ class wasm(wasm_base):
 
     def get_salt(self, regionhash):
         encoded_data = np.frombuffer(regionhash.encode('utf-8'), dtype=np.int8)
-        encoded_data2 = [item for val in encoded_data for item in (val, 0)][:-1] + [0]
-
         size_of_encoded_data = len(encoded_data)
+
+        encoded_data2 = np.zeros(2 * size_of_encoded_data, dtype=np.int8)
+        encoded_data2[::2] = encoded_data  # P
+        
+
         start_index = 1
+        ALWAYS_ZERO = 0
         self.HEAP8[start_index : len(encoded_data2)+start_index] = encoded_data2
         output_index = 1000
-        output_length = 35 #TODO not sure if this is always 35
-        ALWAYS_ZERO = 0
-
+        output_length = self.before_decryption(start_index, size_of_encoded_data, ALWAYS_ZERO)
         output_length = self.decryption(start_index, size_of_encoded_data, output_index, output_length, ALWAYS_ZERO)
-        return self.HEAP8[output_index, output_length].tolist()
+        ret =  self.HEAP8[output_index: output_index+output_length]
+        idx1, idx2 = np.where(ret == 46)[0][-2:]
+        return ret[idx1: idx2+1].tolist()
 
     def buffer(self, dtype):
         return np.frombuffer(self.memory.get_buffer_ptr(self.store), dtype=dtype)

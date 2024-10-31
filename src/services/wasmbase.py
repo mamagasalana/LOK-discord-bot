@@ -1600,3 +1600,9 @@ class wasm_base:
 
     def glClientWaitSync(self, *args):
         return 0
+
+    def log(self, *args):
+        return
+    
+    def log2(self, *args):
+        return

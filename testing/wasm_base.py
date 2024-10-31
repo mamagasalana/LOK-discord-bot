@@ -17,8 +17,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 't
 
 from websocketmanager import customWebSocket, JSSYS,ERRNO_CODES, FS, ASM_CONSTS, UTF8ArrayToString, CANVAS, GL, JSException, WebSocketClientManager, EarlyExit
 HEAP8_DEBUG= []
-HEAP32_DEBUG=  [5950176, 235421712, 278425616, 278700048, 240476172, 279384080, 278491148, 235449756, 278453660, 278728092, 240532264, 279405110, 278533212]
-# HEAP32_DEBUG=  [240476172, 279384080, 278491148, 240532264, 279405110, 278533212]
+HEAP32_DEBUG=  [240116552, 261487267]
+# HEAP32_DEBUG=  [240116552, 240116730, 240391020, 261487140]
 # [235421712, 278425616, 278700048]: decompressed without spaces
 # 240476172: decompressed with spaces
 # 279384080: objects without spaces
@@ -56,7 +56,7 @@ def logwrap(func):
                 if v == out.get(k):
                     self.debugref[k]= -999
                     logging.info(f'{k} changed here')
-                    if k == 279405110:
+                    if k == 240116730:
                         logging.info(log_msg)
                         return
         if self.START_DEBUG:
@@ -96,19 +96,9 @@ def logwrap(func):
 class wasm_base:
     def __init__(self):
         self.START_DEBUG=False
-        self.debugref ={235421712: 1717851478,
-            278425616: 1717851478,
-            278700048: 1717851478,
-            240476172: 5570646,
-            279384080: 1651450491,
-            278491148: 2228347,
-            235449756: 1027428674,
-            278453660: 1027428674,
-            278728092: 1027428674,
-            240532264: 3997757,
-            279405110: 2099403314,
-            278533212: 8192093}
-
+        self.debugref ={240116552: 6553646, 
+                        261487267: 774715186}
+        self.debugref2 = {}
         self.ENV = {}
         self.GETENV_RET = {}
         self.PAGE_SIZE = 16384
@@ -2101,9 +2091,7 @@ class wasm_base:
     
     @logwrap
     def _syscall5(self,param0,varargs):
-        with open('after.bin', 'wb') as ofile:
-            ofile.write(bytes(self.HEAP8))
-        raise EarlyExit
+
         self.SYSCALLS.varargs = varargs
         try:
             pathname = self.SYSCALLS.getStr()
@@ -2119,6 +2107,7 @@ class wasm_base:
                     return -2
                 else:
                     # create regular file
+                    os.makedirs('/'.join(pathname.split('/')[:-1]), exist_ok=True)
                     with open(pathname, 'w') as ofile:
                         pass
 
@@ -2338,7 +2327,7 @@ class wasm_base:
     @logwrap
     def _emscripten_get_now(self):
         logging.warning("modified for decryption testing")
-        return datetime.datetime(2024,10,26, 8,44).timestamp()*1000 - datetime.datetime(2024,10,26, 8,42).timestamp()*1000
+        return datetime.datetime(2024,10,26, 8,44).timestamp()*1000 - datetime.datetime(2024,10,26, 8,43,50).timestamp()*1000
         return time.time()*1000 - self.init_time
     
     @logwrap
@@ -2662,7 +2651,7 @@ class wasm_base:
     def _gettimeofday(self,ptr,param1):
         logging.warning("modified for decryption testing")
         now = time.time()* 1e3
-        now = datetime.datetime(2024,10,26, 8,44).timestamp()*1000 
+        now = datetime.datetime(2024,10,31, 1,20).timestamp()*1000 
         self.HEAP32[ptr >> 2] = int(now / 1e3) 
         self.HEAP32[ptr + 4 >> 2] = int(now % 1e3 * 1e3) 
         return 0

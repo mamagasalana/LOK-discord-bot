@@ -38,6 +38,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 's
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'testing')))
 import time
 from services.lok_service import LokService
+
+
+
 from JS2PY import LOK_JS2PY
 
 lok = LOK_JS2PY("testing/js_testing/test6.wasm")
@@ -48,14 +51,14 @@ lok = LOK_JS2PY("testing/js_testing/test6.wasm")
 # lok._AT_MAIN()
 
 import numpy as np
-with open('before2.bin', 'rb') as ifile:
+with open('n1.bin', 'rb') as ifile:
     heap8 = np.frombuffer(ifile.read(), dtype=np.uint8)
 
 lok.reallocBuffer(heap8.size)
 np.copyto(lok.HEAP8, heap8)
 
 lok.START_DEBUG = True
-lok.dynCall_vi(17961, 0)
+lok.dynCall_iiiii(1108, 13631, 37985600, 26749280, 5949808)
 
 with open('after.bin', 'wb') as ifile:
     ifile.write(bytes(lok.HEAP8))

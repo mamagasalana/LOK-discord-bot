@@ -8,6 +8,7 @@ from db.repository.user_personal_info_repository import UserPersonalInfoReposito
 from db.repository.user_game_info_repository import UserGameInfoRepository
 import base64
 import json
+from wasm_service import wasm_session
 
 class LokService:
     def __init__(self):
@@ -38,6 +39,9 @@ class LokService:
         if not self.accessToken:
             logging.error("Token not found in the response: %s", response.json())
             raise ValueError("Token not found")
+
+        regionHash = response.json().get("regionHash")
+        self.salt = wasm_session.get_salt(regionHash)
 
     @property
     def headers(self):
@@ -76,21 +80,44 @@ class LokService:
 
         return filtered_mails
 
+
     def decryption(self, encrypted_text):
         ret = base64.b64decode(encrypted_text)
-        decryption_key= [46, 101, 48, 120, 57, 49, 55, 97, 98, 51, 57, 49, 97, 50, 46]
-
-        decryption_key_length =len(decryption_key)
+        # salt_key= [46, 100, 56, 53, 57, 56, 51, 48, 97, 98, 51, 101,46]
+        salt_key = self.salt
+        salt_key_length =len(salt_key)
         idx = 0
         out= []
 
         for value1 in ret:
-            tmp = idx % decryption_key_length
-            result = value1 ^ decryption_key[tmp]
+            tmp = idx % salt_key_length
+            result = value1 ^ salt_key[tmp]
             idx += 1
             out.append(result)
 
         return json.loads(bytes(out))
+
+    def encryption(self, plain_text):
+        if isinstance(plain_text, dict):
+            plain_bytes = json.dumps(plain_text).encode('utf-8')
+        else:
+            plain_bytes = plain_text.encode('utf-8')
+        
+        salt_key = self.salt
+        salt_key_length = len(salt_key)
+        
+        idx = 0
+        encrypted_bytes = []
+
+        for value1 in plain_bytes:
+            tmp = idx % salt_key_length
+            result = value1 ^ salt_key[tmp]
+            idx += 1
+            encrypted_bytes.append(result)
+        
+        encrypted_text = base64.b64encode(bytes(encrypted_bytes))
+        return encrypted_text.decode('utf-8')
+
 
     def get_kingdomid_by_xy(self):
         pass

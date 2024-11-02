@@ -16,6 +16,7 @@ class Mine(BaseModel):
     level = IntegerField()
     state = IntegerField()
     expiry = DateTimeField()
+    date = DateTimeField()
 
 # Create tables
 db.connect()

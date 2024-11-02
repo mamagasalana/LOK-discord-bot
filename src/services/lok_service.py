@@ -4,12 +4,17 @@ import urllib.parse
 import logging
 from config.config import DYNAMO_DB_NAME, USER, PASSWORD, LOGIN_URL, MAIL_URL
 import pytz
+import json
+import os
+
 from db.repository.user_personal_info_repository import UserPersonalInfoRepository
 from db.repository.user_game_info_repository import UserGameInfoRepository
 from db.resources.mine import Mine
 
 from services.crypto_service import crypto
 from services.wss_service import LOKWSS
+
+CACHED_LOGIN = 'login.json'
 
 class LokService:
     def __init__(self):
@@ -21,7 +26,39 @@ class LokService:
         self.user_personal_info_repo = UserPersonalInfoRepository(DYNAMO_DB_NAME)
         self.crypto = crypto()
         self.wss = LOKWSS(self.crypto)
-        self.login()
+        self.relogin()
+
+    def relogin(self):
+        """
+        Reuse access token to reduce spamming 
+        """
+        if not os.path.exists(CACHED_LOGIN):
+            self.login()
+
+        js = json.load(open(CACHED_LOGIN))
+        self.accessToken = js.get("token")
+        if not self.accessToken:
+            logging.error("Token not found in the response: %s", js)
+            raise ValueError("Token not found")
+        regionHash = js.get("regionHash")
+
+        self.crypto.update_salt(regionHash)
+        self.crypto.update_token(self.accessToken)
+        #validate if salt works
+        url = 'https://api-lok-live.leagueofkingdoms.com/api/kingdom/task/all'
+        data = {'json': self.crypto.encryption('{}')}
+        r = self.session.post(url, headers=self.headers, data=data)
+        
+        if not r.content.startswith(b'V'):
+            os.remove(CACHED_LOGIN)
+            self.relogin()
+        else:
+            js = self.crypto.decryption(r.content)
+            if 'err' in js:
+                if js['err'].get('code') == 'no_auth':
+                    os.remove(CACHED_LOGIN)
+                    self.relogin()
+
 
     # login api to get access token
     def login(self):
@@ -37,23 +74,8 @@ class LokService:
 
         response = self.session.post(LOGIN_URL, headers=headers, data=encoded_payload)
         response.raise_for_status()
-
-        self.accessToken = response.json().get("token")
-        if not self.accessToken:
-            logging.error("Token not found in the response: %s", response.json())
-            raise ValueError("Token not found")
-
-        regionHash = response.json().get("regionHash")
-        self.crypto.update_salt(regionHash)
-        self.crypto.update_token(self.accessToken)
-
-        #validate if salt works
-        url = 'https://api-lok-live.leagueofkingdoms.com/api/kingdom/task/all'
-        data = {'json': self.crypto.encryption('{}')}
-        r = self.session.post(url, headers=self.headers, data=data)
-        assert(r.content.startswith(b'V'))
-        # self.crypto.decryption(r.content)
-        print('debug')
+        with open(CACHED_LOGIN, 'w') as ofile:
+            ofile.write(json.dumps(response.json()))
 
     @property
     def headers(self):
@@ -78,19 +100,23 @@ class LokService:
             # right edge
             out = fx(zone-1) + fx(zone)
         else:
-            out = fx(zone-1) + fx(zone) + fx(zone+1)
+            out = fx(zone-1) + fx(zone) + fx(zone+1) 
         return [x for x in out if  4096 > x >=0 ]
     
-    def check_entire_map(self):
-        for y in range(0, 4032, 192):
-            for x in range(0, 63, 3):
+    def check_entire_map(self, start_x = 0, start_y=2048):
+        #only covers top half of the map, y from 2048
+        for y in range(start_y, 4096, 192):
+            for x in range(start_x, 63, 3):
                 self.wss.pending_task.append(self.zone_adjacent(x+y+65))
 
-    def get_crystal_mine(self):
+    def get_mine(self, dt, mine_id= 20100105, level=1):
         """
         crystal mine id 'fo_20100105'
         """
-        r = Mine.select().where((Mine.expiry > datetime.datetime.now()) & (Mine.code == 20100105))
+        r = Mine.select().where((Mine.expiry > datetime.datetime.now()) 
+                                & (Mine.date > dt)
+                                & (Mine.code ==mine_id)
+                                & (Mine.level >=level))
         return r
     
     # get personal email list

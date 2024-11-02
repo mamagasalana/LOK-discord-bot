@@ -14,3 +14,4 @@ testing/js_testing/JS_MOUNT2/*
 npbuffer*
 *.bin
 *.db
+login.json

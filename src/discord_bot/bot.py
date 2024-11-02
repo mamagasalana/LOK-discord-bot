@@ -6,6 +6,7 @@ if __name__ == "__main__":
 
 import asyncio
 from datetime import time
+import datetime
 import discord
 from discord import app_commands
 import logging
@@ -54,6 +55,8 @@ class LOKBOT:
         @bot.event
         async def on_ready():
             # https://discord.com/channels/{guild id}/{channel id}
+            get_crystal_mine_signal.start()
+            print_crystal_mine_signal.start()
             await bot.tree.sync()
             await bot.tree.sync(guild=guild)
 
@@ -61,7 +64,7 @@ class LOKBOT:
                 channel = await bot.fetch_channel(channel_id)
                 if channel:
                     await channel.send("Bot has joined the channel!")
-                    
+                    await get_crystal_mine_signal(True)
                     # self.verify_button = VerifyButton()
                     # view = View()
                     # view.add_item(self.verify_button)
@@ -84,6 +87,22 @@ class LOKBOT:
                 )
             except Exception as e:
                 logging.error("Unknown exception - on ready", exc_info=True)
+
+        @tasks.loop(minutes=1) 
+        async def get_crystal_mine_signal(force=False):
+            now = datetime.datetime.now()
+            if now.minute == 10 or force:  # Run task at 10 minutes past the hour
+                self.lokService.check_entire_map()
+                await self.lokService.wss.main()
+
+        @tasks.loop(seconds=5)
+        async def print_crystal_mine_signal():
+            dt = datetime.datetime.now() - datetime.timedelta(seconds=5)
+            mines = self.lokService.get_mine(dt, level=2)
+            channel = await bot.fetch_channel(channel_id)
+            if channel:
+                for m in mines:
+                    await channel.send(f"Crystal mine X:{m.x}, Y:{m.y}, level:{m.level}")
 
         @tasks.loop(seconds=5)  # Set the interval to 5 seconds
         async def check_verification_mail_worker():

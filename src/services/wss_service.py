@@ -8,7 +8,7 @@ from services.crypto_service import crypto
 from db.resources.mine import Mine
 import datetime
 from collections import deque
-import time
+
 
 class WSClosedException(Exception):
     pass
@@ -38,14 +38,14 @@ class LOKWSS:
         data =  {"token": self.token}
         encrypted_data = self.service.encryption(data)
         ret = f'42["/field/enter/v3", "{encrypted_data}"]'
-        logging.info("send %s" % ret)
+        logging.debug("send %s" % ret)
         return ret
     
     @property
     def zone_leave(self):
         data = {"world":self.world, "zones": json.dumps(self.last_zone)}
         ret=  f'42["/zone/leave/list/v2", "{json.dumps(data)}"]'
-        logging.info("send %s %s" % (json.dumps(data), ret))
+        logging.debug("send %s %s" % (json.dumps(data), ret))
         return ret
 
     def zone_enter(self, zonelist:list):
@@ -55,7 +55,7 @@ class LOKWSS:
         data = {"world":self.world, "zones": json.dumps(self.last_zone),"compType":3}
         encrypted_data = self.service.encryption(data)
         ret = f'42["/zone/enter/list/v4", "{encrypted_data}"]'
-        logging.info("send %s %s" % (json.dumps(data), ret))
+        logging.debug("send %s %s" % (json.dumps(data), ret))
         return ret
 
     async def field_enter_out(self, data):
@@ -71,7 +71,7 @@ class LOKWSS:
         """Handles decompression and processing of compressed data."""
         try:
             zone = self.wip_zone.popleft() # done
-            logging.info("decompressing zone %s" % zone)
+            logging.debug("decompressing zone %s" % zone)
 
             js = json.loads(data)
             compressed_data = js[-1]['packs']
@@ -85,6 +85,7 @@ class LOKWSS:
                 if x.get('expired'):
                     out2.append({
                         'expiry': datetime.datetime.strptime(x.get('expired')[:19], '%Y-%m-%dT%H:%M:%S'),
+                        'date': datetime.datetime.now(),
                         '_id': x.get('_id'),
                         'level': x.get('level'),
                         'code': x.get('code'),
@@ -111,9 +112,9 @@ class LOKWSS:
         """Connects to the WebSocket with retry logic."""
         await self.create_session()
         while not self.signal_stop:
-            while self.wip_zone:
-                zone = self.wip_zone.pop()
-                self.pending_task.appendleft(zone)
+            self.wip_zone.clear()
+            if self.last_zone:
+                self.pending_task.appendleft(self.last_zone)
             self.last_zone = []
 
             try:
@@ -128,64 +129,53 @@ class LOKWSS:
             except Exception as e:
                 logging.warning(f"Unexpected exception: {e}", exc_info=True)
             
-            await asyncio.sleep(5)  # Wait before retrying
+            await asyncio.sleep(2)  # Wait before retrying
 
     async def listen(self, ws):
         """Handles incoming WebSocket messages."""
-        start = time.time()
         init = False
         
-        while not self.signal_stop:
-            if time.time() - start > 5:
-                logging.info("2")
-                await ws.send_str("2") 
-                start = time.time()
-                
-            async for msg in ws:
-                logging.info(msg.data[:40])
+        async for msg in ws:
+            logging.debug(msg.data[:40])
 
-                if msg.type == aiohttp.WSMsgType.CLOSED:
-                    raise WSClosedException("WebSocket connection closed by server.")
-                elif msg.type == aiohttp.WSMsgType.ERROR:
-                    raise WSClosedException("Unknown error.")
-                elif msg.data.startswith('0'):
-                    pass
-                elif msg.data == '40':
-                    # initialize
-                    await ws.send_str(self.field_enter)
-                elif msg.data.startswith('42'):
-                    if '/field/enter/v3' in msg.data:
-                        data = msg.data[2:]
-                        js = await self.field_enter_out(data)
-                        # receive response from initialize
+            if msg.type == aiohttp.WSMsgType.CLOSED:
+                raise WSClosedException("WebSocket connection closed by server.")
+            elif msg.type == aiohttp.WSMsgType.ERROR:
+                raise WSClosedException("Unknown error.")
+            elif msg.data.startswith('0'):
+                pass
+            elif msg.data == '40':
+                # initialize
+                await ws.send_str(self.field_enter)
+            elif msg.data.startswith('42') or msg.data == '3':
+                if '/field/enter/v3' in msg.data:
+                    data = msg.data[2:]
+                    js = await self.field_enter_out(data)
+                    # receive response from initialize
+                    await ws.send_str(self.zone_leave)
+                    await ws.send_str(self.zone_enter([0, 64, 1, 65]))
+                    await ws.send_str(self.zone_leave)
+                    await ws.send_str(self.zone_enter(js['loc']))
+
+                elif '/field/objects/v4' in msg.data:
+                    data = msg.data[2:]
+                    await self.field_object(data)
+
+                elif '/march/objects' in msg.data or msg.data == '3':
+                    if not init:
+                        init = True
+                    elif self.pending_task:
+                        newzone = self.pending_task.popleft()
                         await ws.send_str(self.zone_leave)
-                        await ws.send_str(self.zone_enter([0, 64, 1, 65]))
-                        await ws.send_str(self.zone_leave)
-                        await ws.send_str(self.zone_enter(js['loc']))
+                        await ws.send_str(self.zone_enter(newzone))
+                    else:
+                        self.signal_stop = True
+                        break
+                        # await asyncio.sleep(1)
+                        # await ws.send_str("2") 
+            else:
+                logging.warning("unhandled msg")
 
-                    elif '/field/objects/v4' in msg.data:
-                        # real loop starts
-                        data = msg.data[2:]
-                        await self.field_object(data)
-
-                    elif '/march/objects' in msg.data:
-                        if not init:
-                            init = True
-                        else:
-                            newzone = self.pending_task.popleft()
-                            await ws.send_str(self.zone_leave)
-                            await ws.send_str(self.zone_enter(newzone))
-                else:
-                    logging.warning("unhandled msg")
-
-
-
-    def main(self):
-        try:
-            self.loop.create_task(self.connect())
-            self.loop.run_forever()
-        except:
-            logging.error('wss something wrong?', exc_info=True)
-        finally:
-            self.loop.run_until_complete(self.session.close())
-            self.loop.close()
+    async def main(self):
+        await self.connect()  
+        await self.session.close()

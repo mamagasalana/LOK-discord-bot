@@ -13,3 +13,4 @@ testing/js_testing/JS_MOUNT2/*
 *.ipynb
 npbuffer*
 *.bin
+*.db

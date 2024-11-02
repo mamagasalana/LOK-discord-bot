@@ -6,9 +6,10 @@ from config.config import DYNAMO_DB_NAME, USER, PASSWORD, LOGIN_URL, MAIL_URL
 import pytz
 from db.repository.user_personal_info_repository import UserPersonalInfoRepository
 from db.repository.user_game_info_repository import UserGameInfoRepository
-import base64
-import json
-from services.wasm_service import wasm_session
+from db.resources.mine import Mine
+
+from services.crypto_service import crypto
+from services.wss_service import LOKWSS
 
 class LokService:
     def __init__(self):
@@ -18,8 +19,10 @@ class LokService:
         self.codes2LOK = {}  # this maps confirmation code to LOK user
         self.user_game_info_repo = UserGameInfoRepository(DYNAMO_DB_NAME)
         self.user_personal_info_repo = UserPersonalInfoRepository(DYNAMO_DB_NAME)
+        self.crypto = crypto()
+        self.wss = LOKWSS(self.crypto)
         self.login()
-        
+
     # login api to get access token
     def login(self):
         payload = (
@@ -40,8 +43,17 @@ class LokService:
             logging.error("Token not found in the response: %s", response.json())
             raise ValueError("Token not found")
 
-        self.regionHash = response.json().get("regionHash")
-        self.salt = wasm_session.get_salt(self.regionHash)
+        regionHash = response.json().get("regionHash")
+        self.crypto.update_salt(regionHash)
+        self.crypto.update_token(self.accessToken)
+
+        #validate if salt works
+        url = 'https://api-lok-live.leagueofkingdoms.com/api/kingdom/task/all'
+        data = {'json': self.crypto.encryption('{}')}
+        r = self.session.post(url, headers=self.headers, data=data)
+        assert(r.content.startswith(b'V'))
+        # self.crypto.decryption(r.content)
+        print('debug')
 
     @property
     def headers(self):
@@ -50,6 +62,36 @@ class LokService:
             "Content-Type": "application/x-www-form-urlencoded",
             "X-Access-Token": self.accessToken,
         }
+    
+    def zone_from_xy(self, x, y):
+        if (2048 > x >= 0) and (2048 > y >= 0):
+            return int(x/32) + int(y/32)*64
+        return -1
+        
+    def zone_adjacent(self, zone):
+        fx = lambda x: [x-64, x , x +64]
+        
+        if zone % 64 == 0:
+            # left edge
+            out = fx(zone) + fx(zone+1)
+        elif zone % 63 == 0:
+            # right edge
+            out = fx(zone-1) + fx(zone)
+        else:
+            out = fx(zone-1) + fx(zone) + fx(zone+1)
+        return [x for x in out if  4096 > x >=0 ]
+    
+    def check_entire_map(self):
+        for y in range(0, 4032, 192):
+            for x in range(0, 63, 3):
+                self.wss.pending_task.append(self.zone_adjacent(x+y+65))
+
+    def get_crystal_mine(self):
+        """
+        crystal mine id 'fo_20100105'
+        """
+        r = Mine.select().where((Mine.expiry > datetime.datetime.now()) & (Mine.code == 20100105))
+        return r
     
     # get personal email list
     def get_personal_email_list(self):
@@ -79,48 +121,6 @@ class LokService:
         ]
 
         return filtered_mails
-
-
-    def decryption(self, encrypted_text):
-        ret = base64.b64decode(encrypted_text)
-        # salt_key= [46, 100, 56, 53, 57, 56, 51, 48, 97, 98, 51, 101,46]
-        salt_key = self.salt
-        salt_key_length =len(salt_key)
-        idx = 0
-        out= []
-
-        for value1 in ret:
-            tmp = idx % salt_key_length
-            result = value1 ^ salt_key[tmp]
-            idx += 1
-            out.append(result)
-
-        return json.loads(bytes(out))
-
-    def encryption(self, plain_text):
-        if isinstance(plain_text, dict):
-            plain_bytes = json.dumps(plain_text).encode('utf-8')
-        else:
-            plain_bytes = plain_text.encode('utf-8')
-        
-        salt_key = self.salt
-        salt_key_length = len(salt_key)
-        
-        idx = 0
-        encrypted_bytes = []
-
-        for value1 in plain_bytes:
-            tmp = idx % salt_key_length
-            result = value1 ^ salt_key[tmp]
-            idx += 1
-            encrypted_bytes.append(result)
-        
-        encrypted_text = base64.b64encode(bytes(encrypted_bytes))
-        return encrypted_text.decode('utf-8')
-
-
-    def get_kingdomid_by_xy(self):
-        pass
 
     def get_title(self):
         url = 'https://api-lok-live.leagueofkingdoms.com/api/shrine/title'

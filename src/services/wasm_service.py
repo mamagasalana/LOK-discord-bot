@@ -643,5 +643,3 @@ class wasm(wasm_base):
     def HEAPF64(self):
         return self.buffer(np.float64)
 
-
-wasm_session = wasm()

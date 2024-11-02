@@ -170,6 +170,7 @@ class LOKWSS:
                         await ws.send_str(self.zone_enter(newzone))
                     else:
                         self.signal_stop = True
+                        logging.info("wss finish updating mine database")
                         break
                         # await asyncio.sleep(1)
                         # await ws.send_str("2") 

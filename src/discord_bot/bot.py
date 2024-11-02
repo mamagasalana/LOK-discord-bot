@@ -64,7 +64,7 @@ class LOKBOT:
                 channel = await bot.fetch_channel(channel_id)
                 if channel:
                     await channel.send("Bot has joined the channel!")
-                    await get_crystal_mine_signal(True)
+                    # await get_crystal_mine_signal(True)
                     # self.verify_button = VerifyButton()
                     # view = View()
                     # view.add_item(self.verify_button)
@@ -92,6 +92,9 @@ class LOKBOT:
         async def get_crystal_mine_signal(force=False):
             now = datetime.datetime.now()
             if now.minute == 10 or force:  # Run task at 10 minutes past the hour
+                channel = await bot.fetch_channel(channel_id)
+                # print divisor
+                await channel.send("############ Updating mine database ##############")
                 self.lokService.check_entire_map()
                 await self.lokService.wss.main()
 
@@ -100,9 +103,15 @@ class LOKBOT:
             dt = datetime.datetime.now() - datetime.timedelta(seconds=5)
             mines = self.lokService.get_mine(dt, level=2)
             channel = await bot.fetch_channel(channel_id)
-            if channel:
-                for m in mines:
-                    await channel.send(f"Crystal mine X:{m.x}, Y:{m.y}, level:{m.level}")
+            for m in mines:
+                status = await self.lokService.get_occupied(m._id)
+                if not status['result']:
+                    logging.warning("get occupied not working")
+                    
+                if 'fo' in status:
+                    if 'occupied' in status:
+                        continue
+                await channel.send(f"Crystal mine X:{m.x}, Y:{m.y}, level:{m.level}")
 
         @tasks.loop(seconds=5)  # Set the interval to 5 seconds
         async def check_verification_mail_worker():

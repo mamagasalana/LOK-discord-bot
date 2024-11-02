@@ -6,6 +6,7 @@ from config.config import DYNAMO_DB_NAME, USER, PASSWORD, LOGIN_URL, MAIL_URL
 import pytz
 import json
 import os
+import aiohttp
 
 from db.repository.user_personal_info_repository import UserPersonalInfoRepository
 from db.repository.user_game_info_repository import UserGameInfoRepository
@@ -85,6 +86,15 @@ class LokService:
             "X-Access-Token": self.accessToken,
         }
     
+    async def get_occupied(self, foid):
+        url = 'https://api-lok-live.leagueofkingdoms.com/api/field/fieldobject/info'
+        payload = {"json": json.dumps({"foId": foid})}
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=self.headers, data=payload) as response:
+                data = await response.json() 
+                return data
+        
+
     def zone_from_xy(self, x, y):
         if (2048 > x >= 0) and (2048 > y >= 0):
             return int(x/32) + int(y/32)*64

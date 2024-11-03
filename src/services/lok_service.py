@@ -29,11 +29,11 @@ class LokService:
         self.wss = LOKWSS(self.crypto)
         self.relogin()
 
-    def relogin(self):
+    def relogin(self, force=False):
         """
         Reuse access token to reduce spamming 
         """
-        if not os.path.exists(CACHED_LOGIN):
+        if not os.path.exists(CACHED_LOGIN) or force:
             self.login()
 
         js = json.load(open(CACHED_LOGIN))

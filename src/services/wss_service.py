@@ -10,6 +10,7 @@ import datetime
 from collections import deque
 
 
+
 class WSClosedException(Exception):
     pass
 
@@ -24,6 +25,7 @@ class LOKWSS:
         self.pending_task = deque()
         self.world = world
         self.signal_stop = False
+        self.logger  = logging.getLogger("wss")
 
     @property
     def token(self):
@@ -38,14 +40,14 @@ class LOKWSS:
         data =  {"token": self.token}
         encrypted_data = self.service.encryption(data)
         ret = f'42["/field/enter/v3", "{encrypted_data}"]'
-        logging.debug("send %s" % ret)
+        self.logger.debug("send %s" % ret)
         return ret
     
     @property
     def zone_leave(self):
         data = {"world":self.world, "zones": json.dumps(self.last_zone)}
         ret=  f'42["/zone/leave/list/v2", "{json.dumps(data)}"]'
-        logging.debug("send %s %s" % (json.dumps(data), ret))
+        self.logger.debug("send %s %s" % (json.dumps(data), ret))
         return ret
 
     def zone_enter(self, zonelist:list):
@@ -55,7 +57,7 @@ class LOKWSS:
         data = {"world":self.world, "zones": json.dumps(self.last_zone),"compType":3}
         encrypted_data = self.service.encryption(data)
         ret = f'42["/zone/enter/list/v4", "{encrypted_data}"]'
-        logging.debug("send %s %s" % (json.dumps(data), ret))
+        self.logger.debug("send %s %s" % (json.dumps(data), ret))
         return ret
 
     async def field_enter_out(self, data):
@@ -71,7 +73,7 @@ class LOKWSS:
         """Handles decompression and processing of compressed data."""
         try:
             zone = self.wip_zone.popleft() # done
-            logging.debug("decompressing zone %s" % zone)
+            self.logger.debug("decompressing zone %s" % zone)
 
             js = json.loads(data)
             compressed_data = js[-1]['packs']
@@ -105,12 +107,13 @@ class LOKWSS:
             logging.warning(f"Failed to decompress data: {e}", exc_info=True)
 
     async def create_session(self):
-        if self.session is None:
+        if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession() 
 
     async def connect(self):
         """Connects to the WebSocket with retry logic."""
         await self.create_session()
+        SUCCESS = False
         while not self.signal_stop:
             self.wip_zone.clear()
             if self.last_zone:
@@ -119,7 +122,7 @@ class LOKWSS:
 
             try:
                 async with self.session.ws_connect(self.url, heartbeat=1.0, autoping=True) as ws:
-                    await self.listen(ws)
+                    SUCCESS = await self.listen(ws)
             except WSClosedException:
                 logging.warning("WS closed, retrying in 5 seconds")
             except aiohttp.ClientConnectorError:
@@ -131,12 +134,13 @@ class LOKWSS:
             
             await asyncio.sleep(2)  # Wait before retrying
 
+        return SUCCESS
     async def listen(self, ws):
         """Handles incoming WebSocket messages."""
         init = False
         
         async for msg in ws:
-            logging.debug(msg.data[:40])
+            self.logger.debug(msg.data[:40])
 
             if msg.type == aiohttp.WSMsgType.CLOSED:
                 raise WSClosedException("WebSocket connection closed by server.")
@@ -147,6 +151,11 @@ class LOKWSS:
             elif msg.data == '40':
                 # initialize
                 await ws.send_str(self.field_enter)
+            elif msg.data == '41':
+                # unauthorized, need to login and reboot session
+                self.signal_stop = True
+                logging.error("unauthorized, kindly restart login session")
+                return False
             elif msg.data.startswith('42') or msg.data == '3':
                 if '/field/enter/v3' in msg.data:
                     data = msg.data[2:]
@@ -177,6 +186,9 @@ class LOKWSS:
             else:
                 logging.warning("unhandled msg")
 
+        return True
     async def main(self):
-        await self.connect()  
+        self.signal_stop = False
+        SUCCESS = await self.connect()  
         await self.session.close()
+        return SUCCESS

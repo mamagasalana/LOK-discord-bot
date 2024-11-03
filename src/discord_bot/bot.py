@@ -22,6 +22,7 @@ class LOKBOT:
         self.lokService = LokService()# Initialize the LokService instance to handle external API interactions
         self.verify_button = None  # Button for user verification
         self.check_verification_mail_worker = None  # Task for periodic checking
+        self.CRYSTAL_MINE_LOADING = False
 
     def discord_bot(self, token, channel_id):
         """Initialize and run the Discord bot."""
@@ -88,15 +89,24 @@ class LOKBOT:
             except Exception as e:
                 logging.error("Unknown exception - on ready", exc_info=True)
 
+        
         @tasks.loop(minutes=1) 
         async def get_crystal_mine_signal(force=False):
             now = datetime.datetime.now()
             if now.minute == 10 or force:  # Run task at 10 minutes past the hour
+            # if not self.CRYSTAL_MINE_LOADING :
+                self.CRYSTAL_MINE_LOADING = True
                 channel = await bot.fetch_channel(channel_id)
                 # print divisor
                 await channel.send("############ Updating mine database ##############")
                 self.lokService.check_entire_map()
-                await self.lokService.wss.main()
+                SUCCESS =False
+                while not SUCCESS:
+                    SUCCESS = await self.lokService.wss.main()
+                    if SUCCESS:
+                        self.CRYSTAL_MINE_LOADING  = False
+                        break
+                    self.lokService.relogin(force=True)
 
         @tasks.loop(seconds=5)
         async def print_crystal_mine_signal():
@@ -107,7 +117,7 @@ class LOKBOT:
                 status = await self.lokService.get_occupied(m._id)
                 if not status['result']:
                     logging.warning("get occupied not working")
-                    
+
                 if 'fo' in status:
                     if 'occupied' in status:
                         continue

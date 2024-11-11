@@ -86,14 +86,6 @@ class LokService:
             "X-Access-Token": self.accessToken,
         }
     
-    async def get_occupied(self, foid):
-        url = 'https://api-lok-live.leagueofkingdoms.com/api/field/fieldobject/info'
-        payload = {"json": json.dumps({"foId": foid})}
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=self.headers, data=payload) as response:
-                data = await response.json() 
-                return data
-        
 
     def zone_from_xy(self, x, y):
         if (2048 > x >= 0) and (2048 > y >= 0):
@@ -113,10 +105,10 @@ class LokService:
             out = fx(zone-1) + fx(zone) + fx(zone+1) 
         return [x for x in out if  4096 > x >=0 ]
     
-    def check_entire_map(self, start_x = 0, start_y=2048):
+    def check_entire_map(self, start_x = 0, start_y=2048, end_x=63, end_y=4096):
         #only covers top half of the map, y from 2048
-        for y in range(start_y, 4096, 192):
-            for x in range(start_x, 63, 3):
+        for y in range(start_y, end_y, 192):
+            for x in range(start_x, end_x, 3):
                 self.wss.pending_task.append(self.zone_adjacent(x+y+65))
 
     def get_mine(self, dt, mine_id= 20100105, level=1):
@@ -126,7 +118,8 @@ class LokService:
         r = Mine.select().where((Mine.expiry > datetime.datetime.now()) 
                                 & (Mine.date > dt)
                                 & (Mine.code ==mine_id)
-                                & (Mine.level >=level))
+                                & (Mine.level >=level)
+                                & (Mine.occupied== False))
         return r
     
     # get personal email list

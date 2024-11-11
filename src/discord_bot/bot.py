@@ -100,6 +100,7 @@ class LOKBOT:
                 # print divisor
                 await channel.send("############ Updating mine database ##############")
                 self.lokService.check_entire_map()
+                # self.lokService.check_entire_map(start_y=0, end_y=2048)
                 SUCCESS =False
                 while not SUCCESS:
                     SUCCESS = await self.lokService.wss.main()
@@ -114,13 +115,6 @@ class LOKBOT:
             mines = self.lokService.get_mine(dt, level=2)
             channel = await bot.fetch_channel(channel_id)
             for m in mines:
-                status = await self.lokService.get_occupied(m._id)
-                if not status['result']:
-                    logging.warning("get occupied not working")
-
-                if 'fo' in status:
-                    if 'occupied' in status:
-                        continue
                 await channel.send(f"Crystal mine X:{m.x}, Y:{m.y}, level:{m.level}")
 
         @tasks.loop(seconds=5)  # Set the interval to 5 seconds

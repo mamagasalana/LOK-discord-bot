@@ -94,7 +94,8 @@ class LOKWSS:
                         'state': x.get('state'),
                         'world': x.get('loc')[0],
                         'x': x.get('loc')[1],
-                        'y': x.get('loc')[2]
+                        'y': x.get('loc')[2],
+                        'occupied': 'occupied' in x
                     })
 
             if out2:

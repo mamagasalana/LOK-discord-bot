@@ -1,4 +1,4 @@
-from peewee import Model, CharField, IntegerField, DateTimeField
+from peewee import Model, CharField, IntegerField, DateTimeField, BooleanField
 from peewee import SqliteDatabase
 
 db = SqliteDatabase('db.db')
@@ -17,6 +17,7 @@ class Mine(BaseModel):
     state = IntegerField()
     expiry = DateTimeField()
     date = DateTimeField()
+    occupied = BooleanField()
 
 # Create tables
 db.connect()

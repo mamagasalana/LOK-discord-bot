@@ -52,13 +52,13 @@ class LokService:
         
         if not r.content.startswith(b'V'):
             os.remove(CACHED_LOGIN)
-            self.relogin()
+            return self.relogin()
         else:
             js = self.crypto.decryption(r.content)
             if 'err' in js:
                 if js['err'].get('code') == 'no_auth':
                     os.remove(CACHED_LOGIN)
-                    self.relogin()
+                    return self.relogin()
 
 
     # login api to get access token

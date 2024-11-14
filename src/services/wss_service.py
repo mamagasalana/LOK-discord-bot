@@ -8,7 +8,7 @@ from services.crypto_service import crypto
 from db.resources.mine import Mine
 import datetime
 from collections import deque
-
+import time
 
 
 class WSClosedException(Exception):
@@ -139,9 +139,16 @@ class LOKWSS:
     async def listen(self, ws):
         """Handles incoming WebSocket messages."""
         init = False
-        
+        start =  time.time()
+        # send 2 every 30 seconds
+        pause = False
+
         async for msg in ws:
             self.logger.debug(msg.data[:40])
+            if time.time() - start >30:
+                start = time.time()
+                pause = True
+                await ws.send_str('2')
 
             if msg.type == aiohttp.WSMsgType.CLOSED:
                 raise WSClosedException("WebSocket connection closed by server.")
@@ -157,7 +164,14 @@ class LOKWSS:
                 self.signal_stop = True
                 logging.error("unauthorized, kindly restart login session")
                 return False
-            elif msg.data.startswith('42') or msg.data == '3':
+            elif msg.data == '3':
+                pause = False
+                if self.pending_task:
+                    newzone = self.pending_task.popleft()
+                    await ws.send_str(self.zone_leave)
+                    await ws.send_str(self.zone_enter(newzone))
+
+            elif msg.data.startswith('42'):
                 if '/field/enter/v3' in msg.data:
                     data = msg.data[2:]
                     js = await self.field_enter_out(data)
@@ -171,9 +185,11 @@ class LOKWSS:
                     data = msg.data[2:]
                     await self.field_object(data)
 
-                elif '/march/objects' in msg.data or msg.data == '3':
+                elif '/march/objects' in msg.data:
                     if not init:
                         init = True
+                    elif pause:
+                        continue
                     elif self.pending_task:
                         newzone = self.pending_task.popleft()
                         await ws.send_str(self.zone_leave)

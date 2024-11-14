@@ -65,7 +65,7 @@ class LOKBOT:
                 channel = await bot.fetch_channel(channel_id)
                 if channel:
                     await channel.send("Bot has joined the channel!")
-                    # await get_crystal_mine_signal(True)
+                    await get_crystal_mine_signal(True)
                     # self.verify_button = VerifyButton()
                     # view = View()
                     # view.add_item(self.verify_button)
@@ -102,12 +102,14 @@ class LOKBOT:
                 self.lokService.check_entire_map()
                 # self.lokService.check_entire_map(start_y=0, end_y=2048)
                 SUCCESS =False
-                while not SUCCESS:
+                for _ in range(3):
                     SUCCESS = await self.lokService.wss.main()
                     if SUCCESS:
                         self.CRYSTAL_MINE_LOADING  = False
                         break
                     self.lokService.relogin(force=True)
+                    await asyncio.sleep(5)
+                await channel.send("############ Done  ##############")
 
         @tasks.loop(seconds=5)
         async def print_crystal_mine_signal():
@@ -115,7 +117,7 @@ class LOKBOT:
             mines = self.lokService.get_mine(dt, level=2)
             channel = await bot.fetch_channel(channel_id)
             for m in mines:
-                await channel.send(f"Crystal mine X:{m.x}, Y:{m.y}, level:{m.level}")
+                await channel.send(f"Crystal mine X:{m.x}, Y:{m.y}, level:{m.level}, occupied:{m.occupied}")
 
         @tasks.loop(seconds=5)  # Set the interval to 5 seconds
         async def check_verification_mail_worker():

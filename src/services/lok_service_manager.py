@@ -1,0 +1,93 @@
+import datetime
+import logging
+import json
+import asyncio
+from db.resources.mine import Mine
+import time
+from services.lok_service import LokService
+
+LOGIN_CONFIG = json.load(open('LOGIN.json'))
+
+class LokServiceManager:
+    def __init__(self, debug=False):
+        self.workers : dict[str, LokService]  = {}
+        for itm in LOGIN_CONFIG:
+            self.workers[itm['BOT']] = LokService(itm['USER'], itm['PASSWORD'], itm['BOT'])
+    
+    def get_worker_status(self) :
+        return {k: worker.status for k, worker in self.workers.items()}
+    
+    def get_worker(self, botname) -> LokService:
+        return self.workers.get(botname)
+
+    def zone_from_xy(self, x, y):
+        if (2048 > x >= 0) and (2048 > y >= 0):
+            return int(x/32) + int(y/32)*64
+        return -1
+        
+    def zone_adjacent(self, zone):
+        fx = lambda x: [x-64, x , x +64]
+        
+        if zone % 64 == 0:
+            # left edge
+            out = fx(zone) + fx(zone+1)
+        elif zone % 63 == 0:
+            # right edge
+            out = fx(zone-1) + fx(zone)
+        else:
+            out = fx(zone-1) + fx(zone) + fx(zone+1) 
+        return [x for x in out if  4096 > x >=0 ]
+    
+    def check_entire_map(self, start_x = 0, start_y=2048, end_x=63, end_y=4096):
+        #only covers top half of the map, y from 2048
+        ret = []
+        for y in range(start_y, end_y, 192):
+            for x in range(start_x, end_x, 3):
+                ret.append(self.zone_adjacent(x+y+65))
+        
+        part_size = len(ret) // len(self.workers) +1
+        for idx, worker in enumerate(self.workers.values()):
+            worker.wss.pending_task.extend(
+                ret[idx*part_size: (idx+1)*part_size])
+        
+    async def start_wss(self):
+        func_list = []
+        for worker in self.workers.values():
+            func_list.append(worker.start_wss())
+        await asyncio.gather(*func_list)
+
+    def get_mine(self, dt, mine_id= 20100105, level=1):
+        """
+        crystal mine id 'fo_20100105'
+        """
+        r = Mine.select().where((Mine.expiry > datetime.datetime.now()) 
+                                & (Mine.date > dt)
+                                & (Mine.code ==mine_id)
+                                & (Mine.level >=level)
+                                & (Mine.occupied== False))
+        return r
+    
+
+if __name__ == "__main__":
+    import logging
+    logging.basicConfig(
+        filename="logs/wss.log",
+        level=logging.DEBUG,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+    )
+    import asyncio
+    loop = asyncio.get_event_loop()
+
+    a = LokServiceManager(debug=True)
+    # a.check_entire_map()
+    # Schedule the task
+    # a.check_entire_map()
+    
+    # task = loop.create_task(a.start_wss())
+
+    # # Run until the task is complete
+    # result = loop.run_until_complete(task)
+    b = a.get_mine(datetime.datetime(2024, 12,9), level=1)
+    print([ (x.x, x.y)  for x in b if (x.level==1)])
+    # Print the result
+    print(b)

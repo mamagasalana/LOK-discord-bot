@@ -12,14 +12,15 @@ from discord import app_commands
 import logging
 from discord.ext import commands, tasks
 from discord_bot.commands import VerifyButton
-from services.lok_service import LokService
+from services.lok_service_manager import LokServiceManager, LokService
 from discord.ui import View
-from config.config import TOKEN, CHANNEL_ID, GUILD_ID, CODE_EXPIRY_TIME
-
+from config.config import TOKEN, CHANNEL_ID, GUILD_ID, CODE_EXPIRY_TIME, USER, PASSWORD
+from db.resources.lok_resource_map import LOK_RESOURCE_MAP
 
 class LOKBOT:
     def __init__(self):
-        self.lokService = LokService()# Initialize the LokService instance to handle external API interactions
+        self.lokServiceManager = LokServiceManager()
+        self.lokService = self.lokServiceManager.get_worker('teezai3')# Initialize the LokService instance to handle external API interactions
         self.verify_button = None  # Button for user verification
         self.check_verification_mail_worker = None  # Task for periodic checking
         self.CRYSTAL_MINE_LOADING = False
@@ -34,6 +35,7 @@ class LOKBOT:
         bot.tree.clear_commands(guild=None)
         bot.tree.clear_commands(guild=guild)
         ALLOWED_TITLES = ['Alchemist', 'Architect']
+        ALLOWED_RESOURCES = ['Crystal', 'Lumber']
 
         async def autocomplete_requested_title(interaction: discord.Interaction, current: str):
             # Suggest options that match what the user is typing
@@ -42,6 +44,13 @@ class LOKBOT:
                 for title in ALLOWED_TITLES if current.lower() in title.lower()
             ]
 
+        async def autocomplete_requested_resource(interaction: discord.Interaction, current: str):
+            # Suggest options that match what the user is typing
+            return [
+                app_commands.Choice(name=title, value=title)
+                for title in ALLOWED_RESOURCES if current.lower() in title.lower()
+            ]
+        
         # Define the slash command with two inputs and autocomplete for the second input
         @bot.tree.command(name="title", description="Set a title", guild=guild)
         @app_commands.describe( requested_title="Choose a title", your_kingdom_id="Your kingdom ID",)
@@ -53,11 +62,44 @@ class LOKBOT:
             else:
                 await interaction.response.send_message(f"Title: {requested_title} assigned to {username}")
 
+        @bot.tree.command(name="mine", description="request crystal mine", guild=guild)
+        @app_commands.describe( requested_resource="Choose a resource", required_level="level")
+        @app_commands.autocomplete(requested_resource=autocomplete_requested_resource)
+        async def title(interaction: discord.Interaction, requested_resource: str, required_level: str):
+            mine_id = LOK_RESOURCE_MAP.get(requested_resource)
+            mines = self.lokServiceManager.get_mine(datetime.datetime(2010,1,1), mine_id=mine_id, level=int(required_level))
+            resp = []
+            resp.append(f"Requested: {requested_resource}")
+            if not mines:
+                resp.append(f"Not found")
+
+            for m in mines:
+                resp.append(f"X:{m.x}, Y:{m.y}, level:{m.level}, occupied:{m.occupied}")
+
+            count= 0
+            resp_regroup = []
+            for r in resp:
+                #discord has a message limit of 2000
+                current_count = len(r) +1
+                if (count ==0) or (current_count + count >= 2000):
+                    resp_regroup.append([])
+                    count = 0
+
+                resp_regroup[-1].append(r)
+                count += current_count
+
+            for idx, r in enumerate(resp_regroup):
+                chunk = '\n'.join(r)
+                if idx == 0:
+                    await interaction.response.send_message(chunk)  # First message
+                else:
+                    await interaction.followup.send(chunk)  # Subsequent messages
+
         @bot.event
         async def on_ready():
             # https://discord.com/channels/{guild id}/{channel id}
             get_crystal_mine_signal.start()
-            print_crystal_mine_signal.start()
+            # print_crystal_mine_signal.start()
             await bot.tree.sync()
             await bot.tree.sync(guild=guild)
 
@@ -65,7 +107,11 @@ class LOKBOT:
                 channel = await bot.fetch_channel(channel_id)
                 if channel:
                     await channel.send("Bot has joined the channel!")
-                    await get_crystal_mine_signal(True)
+                    await channel.send("You can you /mine command to look for mine information!")
+                    status = self.lokServiceManager.get_worker_status()
+                    await channel.send("############ Check worker status ##############")
+                    await channel.send(f"{status}")
+                    # await get_crystal_mine_signal(True)
                     # self.verify_button = VerifyButton()
                     # view = View()
                     # view.add_item(self.verify_button)
@@ -98,26 +144,22 @@ class LOKBOT:
                 self.CRYSTAL_MINE_LOADING = True
                 channel = await bot.fetch_channel(channel_id)
                 # print divisor
+                status = self.lokServiceManager.get_worker_status()
+                await channel.send("############ Check worker status ##############")
+                await channel.send(f"{status}")
                 await channel.send("############ Updating mine database ##############")
-                self.lokService.check_entire_map()
+                self.lokServiceManager.check_entire_map()
                 # self.lokService.check_entire_map(start_y=0, end_y=2048)
-                SUCCESS =False
-                for _ in range(3):
-                    SUCCESS = await self.lokService.wss.main()
-                    if SUCCESS:
-                        self.CRYSTAL_MINE_LOADING  = False
-                        break
-                    self.lokService.relogin(force=True)
-                    await asyncio.sleep(5)
+                await self.lokService.start_wss()
                 await channel.send("############ Done  ##############")
 
-        @tasks.loop(seconds=5)
-        async def print_crystal_mine_signal():
-            dt = datetime.datetime.now() - datetime.timedelta(seconds=5)
-            mines = self.lokService.get_mine(dt, level=2)
-            channel = await bot.fetch_channel(channel_id)
-            for m in mines:
-                await channel.send(f"Crystal mine X:{m.x}, Y:{m.y}, level:{m.level}, occupied:{m.occupied}")
+        # @tasks.loop(seconds=5)
+        # async def print_crystal_mine_signal():
+        #     dt = datetime.datetime.now() - datetime.timedelta(seconds=5)
+        #     mines = self.lokServiceManager.get_mine(dt, level=2)
+        #     channel = await bot.fetch_channel(channel_id)
+        #     for m in mines:
+        #         await channel.send(f"Crystal mine X:{m.x}, Y:{m.y}, level:{m.level}, occupied:{m.occupied}")
 
         @tasks.loop(seconds=5)  # Set the interval to 5 seconds
         async def check_verification_mail_worker():

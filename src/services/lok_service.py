@@ -1,42 +1,64 @@
-import datetime
 import requests
-import urllib.parse
-import logging
-from config.config import DYNAMO_DB_NAME, USER, PASSWORD, LOGIN_URL, MAIL_URL
-import pytz
-import json
-import os
-import aiohttp
-
-from db.repository.user_personal_info_repository import UserPersonalInfoRepository
-from db.repository.user_game_info_repository import UserGameInfoRepository
-from db.resources.mine import Mine
-
 from services.crypto_service import crypto
 from services.wss_service import LOKWSS
-
-CACHED_LOGIN = 'login.json'
+import os
+import logging
+import json
+import urllib.parse
+from config.config import LOGIN_URL, MAIL_URL
+from db.repository.user_personal_info_repository import UserPersonalInfoRepository
+from db.repository.user_game_info_repository import UserGameInfoRepository
+from config.config import DYNAMO_DB_NAME
+import asyncio
 
 class LokService:
-    def __init__(self):
+    def __init__(self, user, password, botname):
+        self.USER  =user
+        self.PASSWORD  =password
+        self.CACHED_LOGIN = f"{botname}.json"
+        self.crypto = crypto()
+        self.wss = LOKWSS(self.crypto)
         self.session = requests.Session()
         self.accessToken = None
+        self.status = 1  # to check if bot got banned
+        self.relogin()
+
         self.codes2discord = {}  # this maps confirmation code to discord user
         self.codes2LOK = {}  # this maps confirmation code to LOK user
         self.user_game_info_repo = UserGameInfoRepository(DYNAMO_DB_NAME)
         self.user_personal_info_repo = UserPersonalInfoRepository(DYNAMO_DB_NAME)
-        self.crypto = crypto()
-        self.wss = LOKWSS(self.crypto)
-        self.relogin()
+
+    async def start_wss(self):
+        if self.status == 0: # Check if account got banned
+            return
+        
+        SUCCESS =False
+        for _ in range(3):
+            SUCCESS = await self.wss.main()
+            if SUCCESS:
+                break
+            self.relogin(force=True)
+            await asyncio.sleep(5)
+
+        if not SUCCESS:
+            self.status= 0
+
+    @property
+    def headers(self):
+        return {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "X-Access-Token": self.accessToken,
+        }
 
     def relogin(self, force=False):
         """
         Reuse access token to reduce spamming 
         """
-        if not os.path.exists(CACHED_LOGIN) or force:
+        if not os.path.exists(self.CACHED_LOGIN) or force:
             self.login()
 
-        js = json.load(open(CACHED_LOGIN))
+        js = json.load(open(self.CACHED_LOGIN))
         self.accessToken = js.get("token")
         if not self.accessToken:
             logging.error("Token not found in the response: %s", js)
@@ -51,21 +73,20 @@ class LokService:
         r = self.session.post(url, headers=self.headers, data=data)
         
         if not r.content.startswith(b'V'):
-            os.remove(CACHED_LOGIN)
+            os.remove(self.CACHED_LOGIN)
             return self.relogin()
         else:
             js = self.crypto.decryption(r.content)
             if 'err' in js:
                 if js['err'].get('code') == 'no_auth':
-                    os.remove(CACHED_LOGIN)
+                    os.remove(self.CACHED_LOGIN)
                     return self.relogin()
-
 
     # login api to get access token
     def login(self):
         payload = (
             '{"authType":"email","email":"%s","password":"%s","deviceInfo":{"build":"global","OS":"Windows 10","country":"USA","language":"English","bundle":"","version":"1.1775.158.242","platform":"web","pushId":""}}'
-            % (USER, PASSWORD)
+            % (self.USER, self.PASSWORD)
         )
         encoded_payload = "json=" + urllib.parse.quote(payload)
         headers = {
@@ -75,53 +96,9 @@ class LokService:
 
         response = self.session.post(LOGIN_URL, headers=headers, data=encoded_payload)
         response.raise_for_status()
-        with open(CACHED_LOGIN, 'w') as ofile:
+        with open(self.CACHED_LOGIN, 'w') as ofile:
             ofile.write(json.dumps(response.json()))
 
-    @property
-    def headers(self):
-        return {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-            "Content-Type": "application/x-www-form-urlencoded",
-            "X-Access-Token": self.accessToken,
-        }
-    
-
-    def zone_from_xy(self, x, y):
-        if (2048 > x >= 0) and (2048 > y >= 0):
-            return int(x/32) + int(y/32)*64
-        return -1
-        
-    def zone_adjacent(self, zone):
-        fx = lambda x: [x-64, x , x +64]
-        
-        if zone % 64 == 0:
-            # left edge
-            out = fx(zone) + fx(zone+1)
-        elif zone % 63 == 0:
-            # right edge
-            out = fx(zone-1) + fx(zone)
-        else:
-            out = fx(zone-1) + fx(zone) + fx(zone+1) 
-        return [x for x in out if  4096 > x >=0 ]
-    
-    def check_entire_map(self, start_x = 0, start_y=2048, end_x=63, end_y=4096):
-        #only covers top half of the map, y from 2048
-        for y in range(start_y, end_y, 192):
-            for x in range(start_x, end_x, 3):
-                self.wss.pending_task.append(self.zone_adjacent(x+y+65))
-
-    def get_mine(self, dt, mine_id= 20100105, level=1):
-        """
-        crystal mine id 'fo_20100105'
-        """
-        r = Mine.select().where((Mine.expiry > datetime.datetime.now()) 
-                                & (Mine.date > dt)
-                                & (Mine.code ==mine_id)
-                                & (Mine.level >=level)
-                                & (Mine.occupied== False))
-        return r
-    
     # get personal email list
     def get_personal_email_list(self):
         payload = '{"category":0}'

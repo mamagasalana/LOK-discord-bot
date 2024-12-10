@@ -67,7 +67,8 @@ class LOKBOT:
         @app_commands.autocomplete(requested_resource=autocomplete_requested_resource)
         async def title(interaction: discord.Interaction, requested_resource: str, required_level: str):
             mine_id = LOK_RESOURCE_MAP.get(requested_resource)
-            mines = self.lokServiceManager.get_mine(datetime.datetime(2010,1,1), mine_id=mine_id, level=int(required_level))
+            # only return latest data
+            mines = self.lokServiceManager.get_mine(datetime.datetime.now().replace(minute=9), mine_id=mine_id, level=int(required_level))
             resp = []
             resp.append(f"Requested: {requested_resource}")
             if not mines:
@@ -150,7 +151,7 @@ class LOKBOT:
                 await channel.send("############ Updating mine database ##############")
                 self.lokServiceManager.check_entire_map()
                 # self.lokService.check_entire_map(start_y=0, end_y=2048)
-                await self.lokService.start_wss()
+                await self.lokServiceManager.start_wss()
                 await channel.send("############ Done  ##############")
 
         # @tasks.loop(seconds=5)

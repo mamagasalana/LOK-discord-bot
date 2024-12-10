@@ -36,4 +36,4 @@ def setup_logging():
         level=logging.INFO,
         format="%(asctime)s - %(levelname)s - %(message)s",
     )
-    setup_logger("wss", "logs/wss.log", level=logging.DEBUG)
+    

@@ -17,7 +17,7 @@ class LokService:
         self.PASSWORD  =password
         self.CACHED_LOGIN = f"{botname}.json"
         self.crypto = crypto()
-        self.wss = LOKWSS(self.crypto)
+        self.wss = LOKWSS(self.crypto, logger_name=botname)
         self.session = requests.Session()
         self.accessToken = None
         self.status = 1  # to check if bot got banned

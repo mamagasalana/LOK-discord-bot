@@ -51,6 +51,7 @@ class LokServiceManager:
                 ret[idx*part_size: (idx+1)*part_size])
         
     async def start_wss(self):
+        Mine.delete().execute() #empty database
         func_list = []
         for worker in self.workers.values():
             func_list.append(worker.start_wss())

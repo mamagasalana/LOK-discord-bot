@@ -9,13 +9,13 @@ from db.resources.mine import Mine
 import datetime
 from collections import deque
 import time
-
+from config.logger import setup_logger
 
 class WSClosedException(Exception):
     pass
 
 class LOKWSS:
-    def __init__(self, service:crypto, world=26):
+    def __init__(self, service:crypto, world=26, logger_name='wss'):
         self.service = service
         self.session = None # Reuse session
         self.loop = asyncio.get_event_loop()
@@ -25,7 +25,7 @@ class LOKWSS:
         self.pending_task = deque()
         self.world = world
         self.signal_stop = False
-        self.logger  = logging.getLogger("wss")
+        self.logger = setup_logger(logger_name, "logs/wss.log", level=logging.DEBUG)
 
     @property
     def token(self):

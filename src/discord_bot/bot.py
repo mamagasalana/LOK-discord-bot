@@ -34,21 +34,33 @@ class LOKBOT:
         guild = discord.Object(id=GUILD_ID)
         bot.tree.clear_commands(guild=None)
         bot.tree.clear_commands(guild=guild)
-        ALLOWED_TITLES = ['Alchemist', 'Architect']
-        ALLOWED_RESOURCES = ['Crystal', 'Lumber']
+        ALLOWED_TITLES = [
+            {'name': 'Alchemist', 'emoji': '🔮'}, 
+            {'name': 'Architect', 'emoji': '🏛️'}
+        ]
+        ALLOWED_RESOURCES = [
+            {'name': 'Crystal', 'emoji': '💎'}, 
+            {'name': 'Lumber', 'emoji': '🌲'}
+        ]
+
 
         async def autocomplete_requested_title(interaction: discord.Interaction, current: str):
-            # Suggest options that match what the user is typing
             return [
-                app_commands.Choice(name=title, value=title)
-                for title in ALLOWED_TITLES if current.lower() in title.lower()
+                app_commands.Choice(
+                    name=f"{title['emoji']} {title['name']}", 
+                    value=title['name']
+                )
+                for title in ALLOWED_TITLES if current.lower() in title['name'].lower()
             ]
 
+        # Autocomplete function for resources
         async def autocomplete_requested_resource(interaction: discord.Interaction, current: str):
-            # Suggest options that match what the user is typing
             return [
-                app_commands.Choice(name=title, value=title)
-                for title in ALLOWED_RESOURCES if current.lower() in title.lower()
+                app_commands.Choice(
+                    name=f"{resource['emoji']} {resource['name']}", 
+                    value=resource['name']
+                )
+                for resource in ALLOWED_RESOURCES if current.lower() in resource['name'].lower()
             ]
         
         # Define the slash command with two inputs and autocomplete for the second input

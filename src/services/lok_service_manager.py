@@ -2,7 +2,7 @@ import datetime
 import logging
 import json
 import asyncio
-from db.resources.mine import Mine
+from db.resources.mine import Mine, UserLocation
 import time
 from services.lok_service import LokService
 
@@ -11,9 +11,16 @@ LOGIN_CONFIG = json.load(open('LOGIN.json'))
 class LokServiceManager:
     def __init__(self, debug=False):
         self.workers : dict[str, LokService]  = {}
+        if debug:
+            return
         for itm in LOGIN_CONFIG:
             self.workers[itm['BOT']] = LokService(itm['USER'], itm['PASSWORD'], itm['BOT'])
     
+    def set_user_location(self, discord_id, x, y):
+        entry = [{'_id': discord_id, 'x': x, 'y': y,}]
+        qry = UserLocation.insert_many(entry).on_conflict_ignore()
+        qry.execute()
+            
     def get_worker_status(self) :
         return {k: worker.status for k, worker in self.workers.items()}
     
@@ -62,33 +69,56 @@ class LokServiceManager:
         crystal mine id 'fo_20100105'
         """
         r = Mine.select().where((Mine.expiry > datetime.datetime.now()) 
-                                & (Mine.date > dt)
+                                # & (Mine.date > dt)
                                 & (Mine.code ==mine_id)
                                 & (Mine.level >=level)
                                 & (Mine.occupied== False))
         return r
     
+    def get_mine_for_user(self, discord_user_id, dt, mine_id, level):
+        mines = self.get_mine(dt, mine_id, level)
+        u = UserLocation.select().where(UserLocation._id == discord_user_id).first()
+        
+        if not mines:
+            return None
+        
+        if u:
+            get_distance = lambda x, y: ((x-u.x )**2+(y-u.y)**2)**0.5
+            sorted_mines = sorted(mines, key=lambda x: get_distance(x.x, x.y))
+            for idx in range(0, len(sorted_mines), 10):
+                yield sorted_mines[idx: idx+10]
+        else:
+            for idx in range(0, len(mines), 10):
+                yield mines[idx: idx+10]
+
 
 if __name__ == "__main__":
     import logging
     logging.basicConfig(
-        filename="logs/wss.log",
+        filename="logs/wss2.log",
         level=logging.DEBUG,
         format="%(asctime)s - %(levelname)s - %(message)s",
     )
     import asyncio
     loop = asyncio.get_event_loop()
 
-    a = LokServiceManager(debug=True)
-    # a.check_entire_map()
+    if 0:
+        a = LokServiceManager(True)
+    else:
+        a = LokServiceManager()
+        a.check_entire_map()
     # Schedule the task
     # a.check_entire_map()
     
-    # task = loop.create_task(a.start_wss())
+        task = loop.create_task(a.start_wss())
 
-    # # Run until the task is complete
-    # result = loop.run_until_complete(task)
-    b = a.get_mine(datetime.datetime(2024, 12,9), level=1)
-    print([ (x.x, x.y)  for x in b if (x.level==1)])
-    # Print the result
-    print(b)
+        # Run until the task is complete
+        result = loop.run_until_complete(task)
+    b = a.get_mine(datetime.datetime(2024, 12,13), mine_id=20100105, level=1)
+    my_location = (287, 1078)
+    dist = ([ (x.x, x.y, ((x.x-my_location[0])**2+(x.y-my_location[1])**2)**0.5)  
+           for x in b if (x.level==1)])
+
+    sorted_dist = sorted(dist, key=lambda x:x[-1])
+    for d in sorted_dist[0:10]:
+        print(d)

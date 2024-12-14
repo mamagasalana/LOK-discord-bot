@@ -19,6 +19,11 @@ class Mine(BaseModel):
     date = DateTimeField()
     occupied = BooleanField()
 
+class UserLocation(BaseModel):
+    _id = CharField(primary_key=True)
+    x = IntegerField()  
+    y = IntegerField()  
+
 # Create tables
 db.connect()
-db.create_tables([Mine])
+db.create_tables([Mine, UserLocation])

@@ -1,6 +1,16 @@
-
 LOK_RESOURCE_MAP = {
+ 'Farm' :20100101,
  'Lumber' : 20100102,
- 'Crystal' : 20100105
-
+ 'Quarry' :20100103,
+ 'Gold': 20100104,
+ 'Crystal' : 20100105,
+ 'Orc': 20200101,
+ 'Skeleton': 20200102,
+ 'Golem': 20200103,
+ 'Goblin': 20200104,
+ 'Deathkar': 20200201,
+ 'Charm(Normal)': 20500101,
+ 'Charm(Magic)': 20200202,
+ 'Charm(Epic)': 20200203,
+ 'Charm(Legend)': 20200204,
 }

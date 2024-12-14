@@ -1,11 +1,11 @@
 import discord
-from discord.ui import Button
+from discord.ui import Button, View, button
 import random
 import string
 import time
 from config.config import CODE_EXPIRY_TIME, DYNAMO_DB_NAME
 from db.repository.verification_code_repository import VerificationCodeRepository
-
+from discord import Interaction, ButtonStyle
 
 class VerifyButton(Button):
     def __init__(self):
@@ -53,3 +53,26 @@ class VerifyButton(Button):
     def generate_confirmation_code(self, length=6):
         letters_and_digits = string.ascii_letters + string.digits
         return ''.join(random.choice(letters_and_digits) for _ in range(length))
+
+
+class MoreContentView(View):
+    def __init__(self, list_of_resource:list, interaction: Interaction):
+        super().__init__()
+        self.mines = list_of_resource
+        self.interaction = interaction
+
+    @button(label="More...", style=ButtonStyle.primary)
+    async def more_button(self, interaction: Interaction, button: Button):
+
+        try:
+            item = next(self.mines)
+            chunk=  '\n'.join([f"X:{m.x}, Y:{m.y}, level:{m.level}" for m in item])
+            await self.interaction.edit_original_response(view=None)
+            await interaction.response.send_message(chunk, ephemeral=True, view=MoreContentView(self.mines, interaction))
+
+        except StopIteration:
+            await interaction.response.send_message("end of search", ephemeral=True)
+            button.disabled = True
+            await self.interaction.edit_original_response(view=self)
+
+

@@ -1,9 +1,4 @@
 
-if __name__ == "__main__":
-    import os
-    import sys
-    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
 import asyncio
 from datetime import time
 import datetime
@@ -11,7 +6,8 @@ import discord
 from discord import app_commands
 import logging
 from discord.ext import commands, tasks
-from discord_bot.commands import VerifyButton
+from discord_bot.commands import VerifyButton, MoreContentView
+from discord_bot.autocomplete import autocomplete_requested_title, autocomplete_requested_resource
 from services.lok_service_manager import LokServiceManager, LokService
 from discord.ui import View
 from config.config import TOKEN, CHANNEL_ID, GUILD_ID, CODE_EXPIRY_TIME, USER, PASSWORD
@@ -34,35 +30,7 @@ class LOKBOT:
         guild = discord.Object(id=GUILD_ID)
         bot.tree.clear_commands(guild=None)
         bot.tree.clear_commands(guild=guild)
-        ALLOWED_TITLES = [
-            {'name': 'Alchemist', 'emoji': '🔮'}, 
-            {'name': 'Architect', 'emoji': '🏛️'}
-        ]
-        ALLOWED_RESOURCES = [
-            {'name': 'Crystal', 'emoji': '💎'}, 
-            {'name': 'Lumber', 'emoji': '🌲'}
-        ]
 
-
-        async def autocomplete_requested_title(interaction: discord.Interaction, current: str):
-            return [
-                app_commands.Choice(
-                    name=f"{title['emoji']} {title['name']}", 
-                    value=title['name']
-                )
-                for title in ALLOWED_TITLES if current.lower() in title['name'].lower()
-            ]
-
-        # Autocomplete function for resources
-        async def autocomplete_requested_resource(interaction: discord.Interaction, current: str):
-            return [
-                app_commands.Choice(
-                    name=f"{resource['emoji']} {resource['name']}", 
-                    value=resource['name']
-                )
-                for resource in ALLOWED_RESOURCES if current.lower() in resource['name'].lower()
-            ]
-        
         # Define the slash command with two inputs and autocomplete for the second input
         @bot.tree.command(name="title", description="Set a title", guild=guild)
         @app_commands.describe( requested_title="Choose a title", your_kingdom_id="Your kingdom ID",)
@@ -74,39 +42,25 @@ class LOKBOT:
             else:
                 await interaction.response.send_message(f"Title: {requested_title} assigned to {username}")
 
+        @bot.tree.command(name="loc", description="set your lok location", guild=guild)
+        @app_commands.describe( x="x-coordinate", y="y-coordinate")
+        async def location(interaction: discord.Interaction, x: str, y: str):
+            if not x.isnumeric() or not y.isnumeric():
+                await interaction.response.send_message("Invalid coordinates. Please provide numeric values.", ephemeral=True)
+                return
+            self.lokServiceManager.set_user_location(interaction.user.id, x, y)
+            await interaction.response.send_message("done", ephemeral=True)
+
         @bot.tree.command(name="mine", description="request crystal mine", guild=guild)
-        @app_commands.describe( requested_resource="Choose a resource", required_level="level")
+        @app_commands.describe(requested_resource="Choose a resource", required_level="level")
         @app_commands.autocomplete(requested_resource=autocomplete_requested_resource)
-        async def title(interaction: discord.Interaction, requested_resource: str, required_level: str):
+        async def mine(interaction: discord.Interaction, requested_resource: str = "Crystal", required_level: str = "1"):
             mine_id = LOK_RESOURCE_MAP.get(requested_resource)
-            # only return latest data
-            mines = self.lokServiceManager.get_mine(datetime.datetime.now().replace(minute=9), mine_id=mine_id, level=int(required_level))
-            resp = []
-            resp.append(f"Requested: {requested_resource}")
+            # Get the latest data
+            mines = self.lokServiceManager.get_mine_for_user(interaction.user.id, datetime.datetime.now().replace(minute=9), mine_id=mine_id, level=int(required_level))
             if not mines:
-                resp.append(f"Not found")
-
-            for m in mines:
-                resp.append(f"X:{m.x}, Y:{m.y}, level:{m.level}, occupied:{m.occupied}")
-
-            count= 0
-            resp_regroup = []
-            for r in resp:
-                #discord has a message limit of 2000
-                current_count = len(r) +1
-                if (count ==0) or (current_count + count >= 2000):
-                    resp_regroup.append([])
-                    count = 0
-
-                resp_regroup[-1].append(r)
-                count += current_count
-
-            for idx, r in enumerate(resp_regroup):
-                chunk = '\n'.join(r)
-                if idx == 0:
-                    await interaction.response.send_message(chunk)  # First message
-                else:
-                    await interaction.followup.send(chunk)  # Subsequent messages
+                await interaction.response.send_message("Not found", ephemeral=True)
+            await interaction.response.send_message(f"Requesting: {requested_resource}", ephemeral=True, view=MoreContentView(mines, interaction))
 
         @bot.event
         async def on_ready():
@@ -120,7 +74,8 @@ class LOKBOT:
                 channel = await bot.fetch_channel(channel_id)
                 if channel:
                     await channel.send("Bot has joined the channel!")
-                    await channel.send("You can you /mine command to look for mine information!")
+                    await channel.send("You can use /mine command to look for mine information!")
+                    await channel.send("You can also use /loc command to set your location, this will further improve /mine search function")
                     status = self.lokServiceManager.get_worker_status()
                     await channel.send("############ Check worker status ##############")
                     await channel.send(f"{status}")
@@ -165,6 +120,7 @@ class LOKBOT:
                 # self.lokService.check_entire_map(start_y=0, end_y=2048)
                 await self.lokServiceManager.start_wss()
                 await channel.send("############ Done  ##############")
+                self.CRYSTAL_MINE_LOADING = False
 
         # @tasks.loop(seconds=5)
         # async def print_crystal_mine_signal():

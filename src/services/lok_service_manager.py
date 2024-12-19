@@ -7,7 +7,7 @@ import time
 from services.lok_service import LokService
 
 LOGIN_CONFIG = json.load(open('LOGIN.json'))
-
+MAX_RUNNER =2 
 class LokServiceManager:
     def __init__(self, debug=False):
         self.workers : dict[str, LokService]  = {}
@@ -59,10 +59,13 @@ class LokServiceManager:
         
     async def start_wss(self):
         Mine.delete().execute() #empty database
-        func_list = []
-        for worker in self.workers.values():
-            func_list.append(worker.start_wss())
-        await asyncio.gather(*func_list)
+        workers = list(self.workers.values())
+        for idx in range(0, len(workers), MAX_RUNNER):
+            func_list = []
+            for worker in workers[idx: idx+MAX_RUNNER]:
+                func_list.append(worker.start_wss())
+            await asyncio.gather(*func_list)
+            await asyncio.sleep(10)
 
     def get_mine(self, dt, mine_id= 20100105, level=1):
         """
@@ -102,7 +105,7 @@ if __name__ == "__main__":
     import asyncio
     loop = asyncio.get_event_loop()
 
-    if 0:
+    if 1:
         a = LokServiceManager(True)
     else:
         a = LokServiceManager()
@@ -114,11 +117,16 @@ if __name__ == "__main__":
 
         # Run until the task is complete
         result = loop.run_until_complete(task)
-    b = a.get_mine(datetime.datetime(2024, 12,13), mine_id=20100105, level=1)
+    from db.resources.lok_resource_map import LOK_RESOURCE_MAP
+    resources = 'Crystal'
+    mine_id = LOK_RESOURCE_MAP.get(resources)
+    level = 1
+    b = a.get_mine(datetime.datetime(2024, 12,13), mine_id=mine_id, level=1)
     my_location = (287, 1078)
     dist = ([ (x.x, x.y, ((x.x-my_location[0])**2+(x.y-my_location[1])**2)**0.5)  
-           for x in b if (x.level==1)])
+           for x in b if (x.level==level)])
 
+    print(f'{resources}{level}')
     sorted_dist = sorted(dist, key=lambda x:x[-1])
     for d in sorted_dist[0:10]:
         print(d)

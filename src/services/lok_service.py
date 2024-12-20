@@ -38,11 +38,14 @@ class LokService:
     @property
     def resting(self):
         now = datetime.datetime.now()
-        start = now.replace(hour=self.rest_hour, minute=0, second=0, microsecond=0)
-        end  = start + datetime.timedelta(hours=8)
-        ret =  start <= now <= end
-        if ret:
-            self.init = False
+        for idx in range(-1, 2, 1):
+            start = now.replace(hour=self.rest_hour, 
+                                minute=0, second=0, microsecond=0) +datetime.timedelta(days=idx)
+            end  = start + datetime.timedelta(hours=8)
+            ret =  start <= now <= end
+            if ret:
+                self.init = False
+                break
         
         return ret
         

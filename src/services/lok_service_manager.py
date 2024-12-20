@@ -14,7 +14,7 @@ class LokServiceManager:
         if debug:
             return
         for itm in LOGIN_CONFIG:
-            self.workers[itm['BOT']] = LokService(itm['USER'], itm['PASSWORD'], itm['BOT'])
+            self.workers[itm['BOT']] = LokService(itm['USER'], itm['PASSWORD'], itm['BOT'], itm['rest'])
     
     def set_user_location(self, discord_id, x, y):
         entry = [{'_id': discord_id, 'x': x, 'y': y,}]
@@ -27,6 +27,10 @@ class LokServiceManager:
     def get_worker(self, botname) -> LokService:
         return self.workers.get(botname)
 
+    @property
+    def get_active_workers(self):
+        return [worker for worker in self.workers.values() if not worker.resting]
+    
     def zone_from_xy(self, x, y):
         if (2048 > x >= 0) and (2048 > y >= 0):
             return int(x/32) + int(y/32)*64
@@ -52,14 +56,18 @@ class LokServiceManager:
             for x in range(start_x, end_x, 3):
                 ret.append(self.zone_adjacent(x+y+65))
         
-        part_size = len(ret) // len(self.workers) +1
-        for idx, worker in enumerate(self.workers.values()):
+        active_workers = self.get_active_workers
+        part_size = len(ret) // len(active_workers) +1
+        for idx, worker in enumerate(active_workers):
             worker.wss.pending_task.extend(
                 ret[idx*part_size: (idx+1)*part_size])
         
     async def start_wss(self):
         Mine.delete().execute() #empty database
-        workers = list(self.workers.values())
+
+        # only run active worker
+        workers = [ worker for worker in self.workers.values()
+                   if worker.wss.pending_task]
         for idx in range(0, len(workers), MAX_RUNNER):
             func_list = []
             for worker in workers[idx: idx+MAX_RUNNER]:

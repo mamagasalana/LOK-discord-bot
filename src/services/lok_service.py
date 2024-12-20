@@ -10,28 +10,50 @@ from db.repository.user_personal_info_repository import UserPersonalInfoReposito
 from db.repository.user_game_info_repository import UserGameInfoRepository
 from config.config import DYNAMO_DB_NAME
 import asyncio
+import datetime
 
 class LokService:
-    def __init__(self, user, password, botname):
+    def __init__(self, user, password, botname, rest_hour):
         self.USER  =user
         self.PASSWORD  =password
         self.CACHED_LOGIN = f"{botname}.json"
         self.crypto = crypto()
         self.wss = LOKWSS(self.crypto, logger_name=botname)
-        self.session = requests.Session()
+        self.session = None
         self.accessToken = None
+        self.rest_hour = rest_hour
         self.status = 1  # to check if bot got banned
-        self.relogin()
+        self.init = False
+        if not self.resting:
+            print(f"{botname} has started to work")
+            self.relogin()
+        else:
+            print(f"{botname} still sleeping")
 
         self.codes2discord = {}  # this maps confirmation code to discord user
         self.codes2LOK = {}  # this maps confirmation code to LOK user
         self.user_game_info_repo = UserGameInfoRepository(DYNAMO_DB_NAME)
         self.user_personal_info_repo = UserPersonalInfoRepository(DYNAMO_DB_NAME)
 
+    @property
+    def resting(self):
+        now = datetime.datetime.now()
+        start = now.replace(hour=self.rest_hour, minute=0, second=0, microsecond=0)
+        end  = start + datetime.timedelta(hours=8)
+        ret =  start <= now <= end
+        if ret:
+            self.init = False
+        
+        return ret
+        
+
     async def start_wss(self):
         if self.status == 0: # Check if account got banned
             return
         
+        if not self.init:
+            self.relogin()
+
         SUCCESS =False
         for _ in range(3):
             SUCCESS = await self.wss.main()
@@ -55,6 +77,7 @@ class LokService:
         """
         Reuse access token to reduce spamming 
         """
+        self.session = requests.Session() # open a new session
         if not os.path.exists(self.CACHED_LOGIN) or force:
             self.login()
 
@@ -81,6 +104,8 @@ class LokService:
                 if js['err'].get('code') == 'no_auth':
                     os.remove(self.CACHED_LOGIN)
                     return self.relogin()
+
+        self.init=True
 
     # login api to get access token
     def login(self):

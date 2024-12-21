@@ -107,6 +107,10 @@ class LOKBOT:
         @tasks.loop(minutes=1) 
         async def get_crystal_mine_signal(force=False):
             now = datetime.datetime.now()
+            if now.hour == 0:
+                # current server connection resets at 12
+                return
+            
             if now.minute == 10 or force:  # Run task at 10 minutes past the hour
             # if not self.CRYSTAL_MINE_LOADING :
                 self.CRYSTAL_MINE_LOADING = True

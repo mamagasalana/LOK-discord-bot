@@ -4,6 +4,7 @@ LOK_RESOURCE_MAP = {
  'Quarry' :20100103,
  'Gold': 20100104,
  'Crystal' : 20100105,
+ 'DSA' : 20100106,
  'Orc': 20200101,
  'Skeleton': 20200102,
  'Golem': 20200103,

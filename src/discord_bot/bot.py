@@ -7,7 +7,7 @@ from discord import app_commands
 import logging
 from discord.ext import commands, tasks
 from discord_bot.commands import VerifyButton, MoreContentView
-from discord_bot.autocomplete import autocomplete_requested_title, autocomplete_requested_resource
+from discord_bot.autocomplete import autocomplete_requested_title, autocomplete_requested_resource, autocomplete_requested_monster
 from services.lok_service_manager import LokServiceManager, LokService
 from discord.ui import View
 from config.config import TOKEN, CHANNEL_ID, GUILD_ID, CODE_EXPIRY_TIME, USER, PASSWORD
@@ -62,6 +62,17 @@ class LOKBOT:
                 await interaction.response.send_message("Not found", ephemeral=True)
             await interaction.response.send_message(f"Requesting: {requested_resource}", ephemeral=True, view=MoreContentView(mines, interaction))
 
+        @bot.tree.command(name="monster", description="request monster", guild=guild)
+        @app_commands.describe(requested_monster="Choose a monster", required_level="level")
+        @app_commands.autocomplete(requested_monster=autocomplete_requested_monster)
+        async def monster(interaction: discord.Interaction, requested_monster: str , required_level: str = "1"):
+            mine_id = LOK_RESOURCE_MAP.get(requested_monster)
+            # Get the latest data
+            mines = self.lokServiceManager.get_mine_for_user(interaction.user.id, datetime.datetime.now().replace(minute=9), mine_id=mine_id, level=int(required_level))
+            if not mines:
+                await interaction.response.send_message("Not found", ephemeral=True)
+            await interaction.response.send_message(f"Requesting: {requested_monster}", ephemeral=True, view=MoreContentView(mines, interaction))
+
         @bot.event
         async def on_ready():
             # https://discord.com/channels/{guild id}/{channel id}
@@ -75,6 +86,7 @@ class LOKBOT:
                 if channel:
                     await channel.send("Bot has joined the channel!")
                     await channel.send("You can use /mine command to look for mine information!")
+                    await channel.send("You can use /monster command to look for monster information!")
                     await channel.send("You can also use /loc command to set your location, this will further improve /mine search function")
                     status = self.lokServiceManager.get_worker_status()
                     await channel.send("############ Check worker status ##############")

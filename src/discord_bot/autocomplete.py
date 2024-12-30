@@ -13,6 +13,13 @@ ALLOWED_RESOURCES = [
     {'name': 'Quarry', 'emoji': '⛰️'}
 ]
 
+ALLOWED_MONSTER = [
+    {'name': 'Orc', 'emoji': '🪓'}, 
+    {'name': 'Skeleton', 'emoji': '☠️'}, 
+    {'name': 'Golem', 'emoji': '🗿'}, 
+    {'name': 'Goblin', 'emoji': '👹'},
+]
+
 async def autocomplete_requested_title(interaction: discord.Interaction, current: str):
     return [
         app_commands.Choice(
@@ -30,4 +37,14 @@ async def autocomplete_requested_resource(interaction: discord.Interaction, curr
             value=resource['name']
         )
         for resource in ALLOWED_RESOURCES if current.lower() in resource['name'].lower()
+    ]
+
+# Autocomplete function for monster
+async def autocomplete_requested_monster(interaction: discord.Interaction, current: str):
+    return [
+        app_commands.Choice(
+            name=f"{monster['emoji']} {monster['name']}", 
+            value=monster['name']
+        )
+        for monster in ALLOWED_MONSTER if current.lower() in monster['name'].lower()
     ]

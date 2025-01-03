@@ -103,6 +103,7 @@ class LOKWSS:
                         '_id': x.get('_id'),
                         'level': x.get('level'),
                         'code': x.get('code'),
+                        'extra': json.dumps(x),
                         'state': x.get('state'),
                         'world': x.get('loc')[0],
                         'x': x.get('loc')[1],

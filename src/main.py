@@ -27,7 +27,7 @@ def main():
 
     # Initialize and start the bot
     lok_bot = LOKBOT()
-    lok_bot.discord_bot(TOKEN, CHANNEL_ID)
+    lok_bot.discord_bot(TOKEN)
 
     # Run this to test the DynamoDBManager
     # Uncomment the line below to test the DynamoDBManager

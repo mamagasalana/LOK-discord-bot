@@ -79,9 +79,9 @@ class LokServiceManager:
         """
         crystal mine id 'fo_20100105'
         """
-        r = Mine.select().where((Mine.expiry > datetime.datetime.now()) 
+        r = Mine.select().where(#(Mine.expiry > datetime.datetime.now()) 
                                 # & (Mine.date > dt)
-                                & (Mine.code ==mine_id)
+                                 (Mine.code ==mine_id)
                                 & (Mine.level >=level)
                                 & (Mine.occupied== False))
         return r
@@ -113,7 +113,7 @@ if __name__ == "__main__":
     import asyncio
     loop = asyncio.get_event_loop()
 
-    if 1:
+    if 0:
         a = LokServiceManager(True)
     else:
         a = LokServiceManager()

@@ -91,7 +91,7 @@ class LOKBOT:
                 logging.error(f"Channel with ID {self.channel_id} not found.", exc_info=True)
             except discord.errors.Forbidden:
                 logging.error(
-                    f"Bot does not have permission to access the channel with ID {channel_id}.",
+                    f"Bot does not have permission to access the channel with ID {self.channel_id}.",
                     exc_info=True,
                 )
             except Exception as e:
@@ -128,7 +128,7 @@ class LOKBOT:
     @property
     def resource_monster_command(self):
         @app_commands.describe(required_level="level")
-        async def resource(interaction: discord.Interaction, required_level: str):
+        async def resource(interaction: discord.Interaction, required_level: str='1'):
             command_name = interaction.command.name
             mine_id = COMMAND_ABBREVIATION.get(command_name)
             requested_resource  = LOK_RESOURCE_MAP_INVERSE.get(mine_id)

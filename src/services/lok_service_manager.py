@@ -18,7 +18,7 @@ class LokServiceManager:
     
     def set_user_location(self, discord_id, x, y):
         entry = [{'_id': discord_id, 'x': x, 'y': y,}]
-        qry = UserLocation.insert_many(entry).on_conflict_ignore()
+        qry = UserLocation.insert_many(entry).on_conflict_replace()
         qry.execute()
             
     def get_worker_status(self) :

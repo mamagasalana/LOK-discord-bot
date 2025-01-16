@@ -20,6 +20,24 @@ ALLOWED_MONSTER = [
     {'name': 'Goblin', 'emoji': '👹'},
 ]
 
+ALLOWED_CHARM = [
+    {'name': 'Harvester', 'emoji': '🌾'},
+    {'name': 'Lumberjack', 'emoji': '🌲'},
+    {'name': 'Stonecraft', 'emoji': '🪨'},
+    {'name': 'Goldmine', 'emoji': '⛏️'},
+    {'name': 'Scholar', 'emoji': '📚'},
+    {'name': 'Resource', 'emoji': '🌱'},  # gathering
+    {'name': 'Builder', 'emoji': '🔨'},
+    {'name': 'Trainer', 'emoji': '🏋️'},
+    {'name': 'Stamina', 'emoji': '💪'},  # hp
+    {'name': 'Attacker', 'emoji': '⚔️'},
+    {'name': 'Speed', 'emoji': '⚡'},
+    {'name': 'Load', 'emoji': '📦'},
+    {'name': 'Energy', 'emoji': '💥'},  # action point
+    {'name': 'Defender', 'emoji': '🛡️'},
+]
+
+
 async def autocomplete_requested_title(interaction: discord.Interaction, current: str):
     return [
         app_commands.Choice(
@@ -47,4 +65,14 @@ async def autocomplete_requested_monster(interaction: discord.Interaction, curre
             value=monster['name']
         )
         for monster in ALLOWED_MONSTER if current.lower() in monster['name'].lower()
+    ]
+
+# Autocomplete function for charm
+async def autocomplete_requested_charm(interaction: discord.Interaction, current: str):
+    return [
+        app_commands.Choice(
+            name=f"{charm['name']}{charm['emoji']} ", 
+            value=charm['name']
+        )
+        for charm in ALLOWED_CHARM if current.lower() in charm['name'].lower()
     ]

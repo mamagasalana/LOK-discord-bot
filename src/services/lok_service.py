@@ -11,6 +11,8 @@ from db.repository.user_game_info_repository import UserGameInfoRepository
 from config.config import DYNAMO_DB_NAME
 import asyncio
 import datetime
+import base64
+import time
 
 class LokService:
     def __init__(self, user, password, botname, rest_hour):
@@ -34,6 +36,13 @@ class LokService:
         self.codes2LOK = {}  # this maps confirmation code to LOK user
         self.user_game_info_repo = UserGameInfoRepository(DYNAMO_DB_NAME)
         self.user_personal_info_repo = UserPersonalInfoRepository(DYNAMO_DB_NAME)
+
+    @property
+    def decode_jwt(self):
+        header, payload, signature = self.accessToken.split('.')
+        payload += '=' * ((4 - len(payload) % 4) % 4)  # Pad with '=' to make the base64 string length a multiple of 4
+        payload = base64.urlsafe_b64decode(payload)  # Decode base64
+        return json.loads(payload)  # Convert JSON to Python dictionary
 
     @property
     def resting(self):
@@ -76,6 +85,11 @@ class LokService:
             "X-Access-Token": self.accessToken,
         }
 
+    @property
+    def get_ip():
+        response = requests.get('https://httpbin.org/ip')
+        ip = response.json().get('origin')
+    
     def relogin(self, force=False):
         """
         Reuse access token to reduce spamming 
@@ -89,6 +103,13 @@ class LokService:
         if not self.accessToken:
             logging.error("Token not found in the response: %s", js)
             raise ValueError("Token not found")
+        
+        # token expired (relogin half day before)
+        if time.time() - 43200 > self.decode_jwt['exp']:
+            logging.info(f'{self.USER} accesstoken expired, relogin')
+            os.remove(self.CACHED_LOGIN)
+            return self.relogin()
+        
         regionHash = js.get("regionHash")
 
         self.crypto.update_salt(regionHash)
@@ -113,13 +134,28 @@ class LokService:
     # login api to get access token
     def login(self):
         payload = (
-            '{"authType":"email","email":"%s","password":"%s","deviceInfo":{"build":"global","OS":"Windows 10","country":"USA","language":"English","bundle":"","version":"1.1775.158.242","platform":"web","pushId":""}}'
+            '{"authType":"email","email":"%s","password":"%s","deviceInfo":{"OS":"Windows 10","country":"USA","language":"English","bundle":"","version":"1.1785.163.244","platform":"web","pushId":"","build":"global"}}'
             % (self.USER, self.PASSWORD)
         )
         encoded_payload = "json=" + urllib.parse.quote(payload)
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+            "Accept": "*/*",
+            "Accept-Encoding": "gzip, deflate, br, zstd",
+            "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
+            "Cache-Control": "no-cache",
+            "Content-Length": "385",
             "Content-Type": "application/x-www-form-urlencoded",
+            "Origin": "https://play.leagueofkingdoms.com",
+            "Pragma": "no-cache",
+            "Priority": "u=1, i",
+            "Referer": "https://play.leagueofkingdoms.com/",
+            "Sec-CH-UA": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+            "Sec-CH-UA-Mobile": "?0",
+            "Sec-CH-UA-Platform": '"Windows"',
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-site",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
         }
 
         response = self.session.post(LOGIN_URL, headers=headers, data=encoded_payload)

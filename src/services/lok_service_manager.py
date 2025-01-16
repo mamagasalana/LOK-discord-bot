@@ -86,6 +86,13 @@ class LokServiceManager:
                                 & (Mine.occupied== False))
         return r
     
+    def get_charm(self, charm_id, level=1):
+        r = Mine.select().where(#(Mine.expiry > datetime.datetime.now()) 
+                                # & (Mine.date > dt)
+                                 (Mine.charmcode ==charm_id)
+                                & (Mine.level >=level))
+        return r
+    
     def get_mine_for_user(self, discord_user_id, dt, mine_id, level):
         mines = self.get_mine(dt, mine_id, level)
         u = UserLocation.select().where(UserLocation._id == discord_user_id).first()
@@ -102,6 +109,21 @@ class LokServiceManager:
             for idx in range(0, len(mines), 10):
                 yield mines[idx: idx+10]
 
+    def get_charm_for_user(self, discord_user_id, charm_id, level):
+        charms = self.get_charm(charm_id, level)
+        u = UserLocation.select().where(UserLocation._id == discord_user_id).first()
+        
+        if not charms:
+            return None
+        
+        if u:
+            get_distance = lambda x, y: ((x-u.x )**2+(y-u.y)**2)**0.5
+            sorted_charms = sorted(charms, key=lambda x: get_distance(x.x, x.y))
+            for idx in range(0, len(sorted_charms), 10):
+                yield sorted_charms[idx: idx+10]
+        else:
+            for idx in range(0, len(charms), 10):
+                yield charms[idx: idx+10]
 
 if __name__ == "__main__":
     import logging
@@ -113,7 +135,7 @@ if __name__ == "__main__":
     import asyncio
     loop = asyncio.get_event_loop()
 
-    if 0:
+    if 1:
         a = LokServiceManager(True)
     else:
         a = LokServiceManager()
@@ -125,12 +147,12 @@ if __name__ == "__main__":
 
         # Run until the task is complete
         result = loop.run_until_complete(task)
-    from db.resources.lok_resource_map import LOK_RESOURCE_MAP
-    resources = 'Crystal'
-    mine_id = LOK_RESOURCE_MAP.get(resources)
+    from db.resources.lok_resource_map import LOK_RESOURCE_MAP, CHARM_MAP
+    resources = 'Attacker'
+    mine_id = CHARM_MAP.get(resources)
     level = 1
-    b = a.get_mine(datetime.datetime(2024, 12,13), mine_id=mine_id, level=1)
-    my_location = (287, 1078)
+    b = a.get_charm( charm_id=mine_id, level=1)
+    my_location = (222 , 1099)
     dist = ([ (x.x, x.y, ((x.x-my_location[0])**2+(x.y-my_location[1])**2)**0.5)  
            for x in b if (x.level==level)])
 

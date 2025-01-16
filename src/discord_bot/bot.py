@@ -7,11 +7,11 @@ from discord import app_commands
 import logging
 from discord.ext import commands, tasks
 from discord_bot.commands import VerifyButton, MoreContentView
-from discord_bot.autocomplete import autocomplete_requested_title, autocomplete_requested_resource, autocomplete_requested_monster
+from discord_bot.autocomplete import autocomplete_requested_title, autocomplete_requested_charm
 from services.lok_service_manager import LokServiceManager, LokService
 from discord.ui import View
 from config.config import TOKEN, CHANNEL_ID, GUILD_ID, CODE_EXPIRY_TIME, USER, PASSWORD
-from db.resources.lok_resource_map import LOK_RESOURCE_MAP_INVERSE, COMMAND_ABBREVIATION
+from db.resources.lok_resource_map import LOK_RESOURCE_MAP_INVERSE, COMMAND_ABBREVIATION, CHARM_MAP
 
 class LOKBOT:
     def __init__(self):
@@ -41,11 +41,12 @@ class LOKBOT:
 
         bot.tree.add_command(self.title_command, guild=self.guild)
         bot.tree.add_command(self.set_location_command, guild=self.guild)
+        bot.tree.add_command(self.charm_command, guild=self.guild)
         for command_name in COMMAND_ABBREVIATION:
             bot.tree.add_command(
                 discord.app_commands.Command(
                     name=command_name,
-                    description="Request resource/monster/charm",
+                    description="Request resource/monster",
                     callback=self.resource_monster_command
                 ),
                 guild=self.guild
@@ -140,6 +141,21 @@ class LOKBOT:
 
         return resource
 
+    @property
+    def charm_command(self):
+        @app_commands.command(name="charm",description="Request charm")
+        @app_commands.describe(requested_charm="Charm Type", required_level="Charm Level" )
+        @app_commands.autocomplete(requested_charm=autocomplete_requested_charm)
+        async def charm(interaction: discord.Interaction, requested_charm: str, required_level: str='1'):
+            charm_id = CHARM_MAP.get(requested_charm)
+            # Get the latest data
+            mines = self.lokServiceManager.get_charm_for_user(interaction.user.id, charm_id=charm_id, level=int(required_level))
+            if not mines:
+                await interaction.response.send_message("Not found", ephemeral=True)
+            await interaction.response.send_message(f"Requesting: {requested_charm}", ephemeral=True, view=MoreContentView(mines, interaction))
+
+        return charm
+    
     @tasks.loop(minutes=1) 
     async def get_crystal_mine_signal(self, force=False):
         now = datetime.datetime.now()

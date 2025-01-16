@@ -13,6 +13,7 @@ class Mine(BaseModel):
     world = IntegerField()              
     x = IntegerField()              
     y = IntegerField()              
+    charmcode = IntegerField()
     level = IntegerField()
     state = IntegerField()
     expiry = DateTimeField()

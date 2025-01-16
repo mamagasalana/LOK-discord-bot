@@ -18,6 +18,23 @@ LOK_RESOURCE_MAP = {
  'Legend': 20500104,
 }
 
+CHARM_MAP = {
+    'Harvester': 1,
+    'Lumberjack': 2,
+    'Stonecraft': 3,
+    'Goldmine': 4,
+    'Scholar': 5,
+    'Resource': 6,  # gathering
+    'Builder': 7,
+    'Trainer': 8,
+    'Stamina': 9,  # hp
+    'Attacker': 10,
+    'Speed': 11,
+    'Load': 12,
+    'Energy': 13,  # action point
+    'Defender': 14,
+}
+
 LOK_RESOURCE_MAP_INVERSE = {v:k for k,v in LOK_RESOURCE_MAP.items()}
 
 HEADER_MAP = {
@@ -30,5 +47,7 @@ COMMAND_ABBREVIATION = {}
 for k,v in LOK_RESOURCE_MAP.items():
     header=str(v)[:6]
     if header in HEADER_MAP:
+        if HEADER_MAP.get(header) == 'c':
+            continue
         new_id = '%s%s' % (HEADER_MAP.get(header), k[0].lower())
         COMMAND_ABBREVIATION[new_id] = v

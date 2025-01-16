@@ -97,6 +97,10 @@ class LOKWSS:
             out2 = []
             for x in out['objects']:
                 if x.get('expired'):
+                    charmcode = -1
+                    if 'param' in x:
+                        if 'charmCode' in x['param']:
+                            charmcode = int(str(x['param']['charmCode'])[:-2])
                     out2.append({
                         'expiry': datetime.datetime.strptime(x.get('expired')[:19], '%Y-%m-%dT%H:%M:%S'),
                         'date': datetime.datetime.now(),
@@ -104,6 +108,7 @@ class LOKWSS:
                         'level': x.get('level'),
                         'code': x.get('code'),
                         'extra': json.dumps(x),
+                        'charmcode' : charmcode,
                         'state': x.get('state'),
                         'world': x.get('loc')[0],
                         'x': x.get('loc')[1],

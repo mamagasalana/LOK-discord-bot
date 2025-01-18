@@ -18,7 +18,7 @@ class LokService:
     def __init__(self, user, password, botname, rest_hour):
         self.USER  =user
         self.PASSWORD  =password
-        self.CACHED_LOGIN = f"{botname}.json"
+        self.CACHED_LOGIN = f"src/cache/{botname}.json"
         self.crypto = crypto()
         self.wss = LOKWSS(self.crypto, logger_name=botname)
         self.session = None

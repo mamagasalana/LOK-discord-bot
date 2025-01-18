@@ -36,6 +36,7 @@ CHARM_MAP = {
 }
 
 LOK_RESOURCE_MAP_INVERSE = {v:k for k,v in LOK_RESOURCE_MAP.items()}
+CHARM_MAP_INVERSE  = {v:k for k,v in CHARM_MAP.items()}
 
 HEADER_MAP = {
     '201001': 'r', #resource

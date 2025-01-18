@@ -2,11 +2,11 @@ import datetime
 import logging
 import json
 import asyncio
-from db.resources.mine import Mine, UserLocation
+from db.resources.mine import Mine
 import time
 from services.lok_service import LokService
 
-LOGIN_CONFIG = json.load(open('LOGIN.json'))
+LOGIN_CONFIG = json.load(open('src/cache/LOGIN.json'))
 MAX_RUNNER =2 
 class LokServiceManager:
     def __init__(self, debug=False):
@@ -15,12 +15,7 @@ class LokServiceManager:
             return
         for itm in LOGIN_CONFIG:
             self.workers[itm['BOT']] = LokService(itm['USER'], itm['PASSWORD'], itm['BOT'], itm['rest'])
-    
-    def set_user_location(self, discord_id, x, y):
-        entry = [{'_id': discord_id, 'x': x, 'y': y,}]
-        qry = UserLocation.insert_many(entry).on_conflict_replace()
-        qry.execute()
-            
+                
     def get_worker_status(self) :
         return {k: worker.status for k, worker in self.workers.items()}
     
@@ -75,55 +70,6 @@ class LokServiceManager:
             await asyncio.gather(*func_list)
             await asyncio.sleep(10)
 
-    def get_mine(self, dt, mine_id= 20100105, level=1):
-        """
-        crystal mine id 'fo_20100105'
-        """
-        r = Mine.select().where(#(Mine.expiry > datetime.datetime.now()) 
-                                # & (Mine.date > dt)
-                                 (Mine.code ==mine_id)
-                                & (Mine.level >=level)
-                                & (Mine.occupied== False))
-        return r
-    
-    def get_charm(self, charm_id, level=1):
-        r = Mine.select().where(#(Mine.expiry > datetime.datetime.now()) 
-                                # & (Mine.date > dt)
-                                 (Mine.charmcode ==charm_id)
-                                & (Mine.level >=level))
-        return r
-    
-    def get_mine_for_user(self, discord_user_id, dt, mine_id, level):
-        mines = self.get_mine(dt, mine_id, level)
-        u = UserLocation.select().where(UserLocation._id == discord_user_id).first()
-        
-        if not mines:
-            return None
-        
-        if u:
-            get_distance = lambda x, y: ((x-u.x )**2+(y-u.y)**2)**0.5
-            sorted_mines = sorted(mines, key=lambda x: get_distance(x.x, x.y))
-            for idx in range(0, len(sorted_mines), 10):
-                yield sorted_mines[idx: idx+10]
-        else:
-            for idx in range(0, len(mines), 10):
-                yield mines[idx: idx+10]
-
-    def get_charm_for_user(self, discord_user_id, charm_id, level):
-        charms = self.get_charm(charm_id, level)
-        u = UserLocation.select().where(UserLocation._id == discord_user_id).first()
-        
-        if not charms:
-            return None
-        
-        if u:
-            get_distance = lambda x, y: ((x-u.x )**2+(y-u.y)**2)**0.5
-            sorted_charms = sorted(charms, key=lambda x: get_distance(x.x, x.y))
-            for idx in range(0, len(sorted_charms), 10):
-                yield sorted_charms[idx: idx+10]
-        else:
-            for idx in range(0, len(charms), 10):
-                yield charms[idx: idx+10]
 
 if __name__ == "__main__":
     import logging
@@ -135,7 +81,7 @@ if __name__ == "__main__":
     import asyncio
     loop = asyncio.get_event_loop()
 
-    if 1:
+    if 0:
         a = LokServiceManager(True)
     else:
         a = LokServiceManager()
@@ -147,16 +93,3 @@ if __name__ == "__main__":
 
         # Run until the task is complete
         result = loop.run_until_complete(task)
-    from db.resources.lok_resource_map import LOK_RESOURCE_MAP, CHARM_MAP
-    resources = 'Attacker'
-    mine_id = CHARM_MAP.get(resources)
-    level = 1
-    b = a.get_charm( charm_id=mine_id, level=1)
-    my_location = (222 , 1099)
-    dist = ([ (x.x, x.y, ((x.x-my_location[0])**2+(x.y-my_location[1])**2)**0.5)  
-           for x in b if (x.level==level)])
-
-    print(f'{resources}{level}')
-    sorted_dist = sorted(dist, key=lambda x:x[-1])
-    for d in sorted_dist[0:10]:
-        print(d)

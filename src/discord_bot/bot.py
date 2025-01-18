@@ -6,14 +6,17 @@ import discord
 from discord import app_commands
 import logging
 from discord.ext import commands, tasks
-from discord_bot.commands import VerifyButton, MoreContentView
+from discord_bot.commands import VerifyButton, MoreContentView, LOKScreenerView
 from discord_bot.autocomplete import autocomplete_requested_title, autocomplete_requested_charm
 from services.lok_service_manager import LokServiceManager, LokService
-from discord.ui import View
+from services.resourcefinder_service import ResourceFinder
+from services.cache_service import BOT_CACHE
+
 from config.config import TOKEN, CHANNEL_ID, GUILD_ID, CODE_EXPIRY_TIME, USER, PASSWORD
 from db.resources.lok_resource_map import LOK_RESOURCE_MAP_INVERSE, COMMAND_ABBREVIATION, CHARM_MAP
 
 class LOKBOT:
+
     def __init__(self):
         # self.lokServiceManager  =None
         # self.lokService = None
@@ -26,8 +29,15 @@ class LOKBOT:
         self.bot = None
         self.channel_id = CHANNEL_ID
         self.guild = discord.Object(id=GUILD_ID)
-        
-
+        self.main_message_content = """
+            Bot has joined the channel!
+            """
+            # You can use /r + {prefix of resource} command to look for resource information!
+            # etc: rc for Crystal, rl for Lumber
+            # You can use /m + {prefix of monster} command to look for monster information!
+            # etc: mg for Golem, mt for Treasure Goblin
+            # You can also use /loc command to set your location, this will further improve the search function.
+    
     def discord_bot(self, token):
         """Initialize and run the Discord bot."""
         intents = discord.Intents.default()
@@ -62,18 +72,31 @@ class LOKBOT:
             try:
                 channel = await bot.fetch_channel(self.channel_id)
                 if channel:
-                    await channel.send(
-                        "Bot has joined the channel!\n"
-                        "You can use /r + {prefix of resource} command to look for resource information!\n"
-                        "etc: rc for Crystal, rl for Lumber\n"
-                        "You can use /m + {prefix of monster} command to look for monster information!\n"
-                        "etc: mg for Golem, mt for Treasure Goblin\n"
-                        "You can also use /loc command to set your location, this will further improve the search function."
-                    )
-                    status = self.lokServiceManager.get_worker_status()
-                    await channel.send("############ Check worker status ##############\n"
-                                       f"{status}"
-                                       )
+                    main_message_id = BOT_CACHE.load_message_id()
+                    main_message = None
+
+                    if main_message_id:
+                        try:
+                            main_message = await channel.fetch_message(main_message_id)
+                        except:
+                            pass
+
+                    if not main_message:
+                        try:
+                            main_message = await channel.send(self.main_message_content, view=LOKScreenerView())
+                            await main_message.pin()
+                            BOT_CACHE.save_message_id(main_message.id)
+                        except discord.Forbidden:
+                            print("Bot does not have permission to send or pin messages in the channel.")
+                        except discord.HTTPException as e:
+                            print(f"Failed to send or pin the message: {e}")
+
+                    bot.add_view(LOKScreenerView())
+                    # await channel.send(self.welcome_message, view=LOKScreenerView())
+                    # status = self.lokServiceManager.get_worker_status()
+                    # await channel.send("############ Check worker status ##############\n"
+                    #                    f"{status}"
+                    #                    )
                     
                     # self.verify_button = VerifyButton()
                     # view = View()
@@ -122,7 +145,7 @@ class LOKBOT:
             if not x.isnumeric() or not y.isnumeric():
                 await interaction.response.send_message("Invalid coordinates. Please provide numeric values.", ephemeral=True)
                 return
-            self.lokServiceManager.set_user_location(interaction.user.id, x, y)
+            ResourceFinder.set_user_location(interaction.user.id, x, y)
             await interaction.response.send_message("done", ephemeral=True)
         return location
     
@@ -134,7 +157,7 @@ class LOKBOT:
             mine_id = COMMAND_ABBREVIATION.get(command_name)
             requested_resource  = LOK_RESOURCE_MAP_INVERSE.get(mine_id)
             # Get the latest data
-            mines = self.lokServiceManager.get_mine_for_user(interaction.user.id, datetime.datetime.now().replace(minute=9), mine_id=mine_id, level=int(required_level))
+            mines = ResourceFinder.get_mine_for_user(interaction.user.id, mine_id=mine_id, level=int(required_level))
             if not mines:
                 await interaction.response.send_message("Not found", ephemeral=True)
             await interaction.response.send_message(f"Requesting: {requested_resource}", ephemeral=True, view=MoreContentView(mines, interaction))
@@ -149,7 +172,7 @@ class LOKBOT:
         async def charm(interaction: discord.Interaction, requested_charm: str, required_level: str='1'):
             charm_id = CHARM_MAP.get(requested_charm)
             # Get the latest data
-            mines = self.lokServiceManager.get_charm_for_user(interaction.user.id, charm_id=charm_id, level=int(required_level))
+            mines = ResourceFinder.get_charm_for_user(interaction.user.id, charm_id=charm_id, level=int(required_level))
             if not mines:
                 await interaction.response.send_message("Not found", ephemeral=True)
             await interaction.response.send_message(f"Requesting: {requested_charm}", ephemeral=True, view=MoreContentView(mines, interaction))

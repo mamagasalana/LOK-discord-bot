@@ -23,7 +23,7 @@ ALLOWED_MONSTER = [
 ALLOWED_CHARM = [
     {'name': 'Harvester', 'emoji': '🌾'},
     {'name': 'Lumberjack', 'emoji': '🌲'},
-    {'name': 'Stonecraft', 'emoji': '🪨'},
+    {'name': 'Stonecraft', 'emoji': '⛰️'},
     {'name': 'Goldmine', 'emoji': '⛏️'},
     {'name': 'Scholar', 'emoji': '📚'},
     {'name': 'Resource', 'emoji': '🌱'},  # gathering

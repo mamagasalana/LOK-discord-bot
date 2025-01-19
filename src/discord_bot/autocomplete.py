@@ -17,7 +17,7 @@ ALLOWED_MONSTER = [
     {'name': 'Orc', 'emoji': '🪓'}, 
     {'name': 'Skeleton', 'emoji': '☠️'}, 
     {'name': 'Golem', 'emoji': '🗿'}, 
-    {'name': 'Goblin', 'emoji': '👹'},
+    {'name': 'TreasureGoblin', 'emoji': '👹'},
 ]
 
 ALLOWED_CHARM = [

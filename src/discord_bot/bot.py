@@ -25,7 +25,7 @@ class LOKBOT:
         self.verify_button = None  # Button for user verification
         self.check_verification_mail_worker = None  # Task for periodic checking
         self.CRYSTAL_MINE_LOADING = False
-        
+        self.CRYSTAL_MINE_LAST_UPDATE = None
         self.bot = None
         self.channel_id = CHANNEL_ID
         self.guild = discord.Object(id=GUILD_ID)
@@ -65,7 +65,7 @@ class LOKBOT:
         @bot.event
         async def on_ready():
             # https://discord.com/channels/{guild id}/{channel id}
-            self.get_crystal_mine_signal.start()
+            # self.get_crystal_mine_signal.start()
             await bot.tree.sync()
             await bot.tree.sync(guild=self.guild)
 
@@ -83,7 +83,7 @@ class LOKBOT:
 
                     if not main_message:
                         try:
-                            main_message = await channel.send(self.main_message_content, view=LOKScreenerView())
+                            main_message = await channel.send(self.main_message_content, view=LOKScreenerView(self.get_crystal_mine_signal2))
                             await main_message.pin()
                             BOT_CACHE.save_message_id(main_message.id)
                         except discord.Forbidden:
@@ -91,7 +91,7 @@ class LOKBOT:
                         except discord.HTTPException as e:
                             print(f"Failed to send or pin the message: {e}")
 
-                    bot.add_view(LOKScreenerView())
+                    bot.add_view(LOKScreenerView(self.get_crystal_mine_signal2))
                     # await channel.send(self.welcome_message, view=LOKScreenerView())
                     # status = self.lokServiceManager.get_worker_status()
                     # await channel.send("############ Check worker status ##############\n"
@@ -179,27 +179,61 @@ class LOKBOT:
 
         return charm
     
-    @tasks.loop(minutes=1) 
-    async def get_crystal_mine_signal(self, force=False):
+    async def get_crystal_mine_signal2(self, interaction: discord.Interaction):
         now = datetime.datetime.now()
         if now.hour == 0:
             # current server connection resets at 12
+            await interaction.response.send_message("Server is sleeping, refuse to update database", ephemeral=True)
             return
         
-        if now.minute == 10 or force:  # Run task at 10 minutes past the hour
-        # if not self.CRYSTAL_MINE_LOADING :
-            self.CRYSTAL_MINE_LOADING = True
-            channel = await self.bot.fetch_channel(self.channel_id)
-            # print divisor
-            status = self.lokServiceManager.get_worker_status()
-            await channel.send("############ Check worker status ##############")
-            await channel.send(f"{status}")
-            await channel.send("############ Updating mine database ##############")
-            self.lokServiceManager.check_entire_map()
-            # self.lokService.check_entire_map(start_y=0, end_y=2048)
-            await self.lokServiceManager.start_wss()
-            await channel.send("############ Done  ##############")
-            self.CRYSTAL_MINE_LOADING = False
+        if self.CRYSTAL_MINE_LOADING :
+            await interaction.response.send_message("Server is still updating database, please be patient", ephemeral=True)
+            return 
+        
+        if self.CRYSTAL_MINE_LAST_UPDATE is not None:
+            time_passed = now - self.CRYSTAL_MINE_LAST_UPDATE
+            remaining_time = datetime.timedelta(hours=1) - time_passed
+            if remaining_time > datetime.timedelta(seconds=0):
+                # Format the remaining time as minutes and seconds
+                minutes = remaining_time.seconds // 60
+                seconds = remaining_time.seconds % 60
+                await interaction.response.send_message(f"You still need to wait {minutes} minutes and {seconds} seconds.", ephemeral=True)
+                return 
+        
+        self.CRYSTAL_MINE_LAST_UPDATE =  now
+        await interaction.response.send_message("Updating database ...", ephemeral=True)     
+        self.CRYSTAL_MINE_LOADING = True
+        self.lokServiceManager.check_entire_map()
+        # self.lokService.check_entire_map(start_y=0, end_y=2048)
+        await self.lokServiceManager.start_wss()
+
+        timespent = datetime.datetime.now() - now
+        minutes = timespent.seconds // 60
+        seconds = timespent.seconds % 60
+        await interaction.followup.send(f"Database update complete. Used {minutes} minutes and {seconds} seconds.", ephemeral=True)
+        self.CRYSTAL_MINE_LOADING = False
+
+    # @tasks.loop(minutes=1) 
+    # async def get_crystal_mine_signal(self, force=False):
+    #     now = datetime.datetime.now()
+    #     if now.hour == 0:
+    #         # current server connection resets at 12
+    #         return
+        
+    #     if now.minute == 10 or force:  # Run task at 10 minutes past the hour
+    #     # if not self.CRYSTAL_MINE_LOADING :
+    #         self.CRYSTAL_MINE_LOADING = True
+    #         channel = await self.bot.fetch_channel(self.channel_id)
+    #         # print divisor
+    #         status = self.lokServiceManager.get_worker_status()
+    #         await channel.send("############ Check worker status ##############")
+    #         await channel.send(f"{status}")
+    #         await channel.send("############ Updating mine database ##############")
+    #         self.lokServiceManager.check_entire_map()
+    #         # self.lokService.check_entire_map(start_y=0, end_y=2048)
+    #         await self.lokServiceManager.start_wss()
+    #         await channel.send("############ Done  ##############")
+    #         self.CRYSTAL_MINE_LOADING = False
 
 
         # @tasks.loop(seconds=5)  # Set the interval to 5 seconds

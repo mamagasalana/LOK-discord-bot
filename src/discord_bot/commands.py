@@ -118,19 +118,21 @@ class LocationModal(Modal):
         await interaction.response.send_message("done", ephemeral=True)
 
 class LOKScreenerView(View):
-    def __init__(self):
+    def __init__(self, crystal_mine_callback):
         # Set timeout=None for persistent view
         super().__init__(timeout=None)
         b_resource = Button(label="Resource Screener", style=ButtonStyle.primary, custom_id="main:open_form1")
         b_monster = Button(label="Monster Screener", style=ButtonStyle.primary, custom_id="main:open_form2")
         b_charm = Button(label="Charm Screener", style=ButtonStyle.primary, custom_id="main:open_form3")
         b_loc = Button(label="Set Location", style=ButtonStyle.primary, custom_id="main:open_form4")
+        b_update = Button(label="Update Database", style=ButtonStyle.primary, custom_id="main:open_form5")
 
         b_resource.callback = self.open_form_resource
         b_monster.callback = self.open_form_monster
         b_charm.callback = self.open_form_charm
         b_loc.callback = self.open_form_loc
-        self.add_item(b_resource);  self.add_item(b_monster); self.add_item(b_charm); self.add_item(b_loc)
+        b_update.callback = crystal_mine_callback
+        self.add_item(b_resource);  self.add_item(b_monster); self.add_item(b_charm); self.add_item(b_loc); self.add_item(b_update)
 
     async def open_form_resource(self, interaction: Interaction):
         view = ScreenerView(interaction.user.id, 'resource')

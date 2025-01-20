@@ -39,6 +39,7 @@ class ResourceFinder:
             (
                 (Mine.level.in_(levels)) if isinstance(levels, list) else (Mine.level >= levels)
             )
+            & (Mine.occupied== False)
         )
         u = UserLocation.select().where(UserLocation._id == discord_user_id).first()
         
@@ -64,6 +65,7 @@ class ResourceFinder:
             (
                 (Mine.level.in_(levels)) if isinstance(levels, list) else (Mine.level >= levels)
             )
+            & (Mine.occupied== False)
         )
         u = UserLocation.select().where(UserLocation._id == discord_user_id).first()
         

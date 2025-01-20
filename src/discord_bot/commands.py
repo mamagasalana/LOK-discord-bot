@@ -157,7 +157,7 @@ class ScreenerView(View):
     def __init__(self, userid, category):
         super().__init__()  
         self.category = category
-        
+        userid = str(userid)
         if userid not in USER_CACHE:
             USER_CACHE[userid]= {
                         'resource': [],
@@ -202,15 +202,15 @@ class ScreenerView(View):
         self.add_item(self.submit_button)
 
     async def select_callback(self, interaction: Interaction):
-        USER_CACHE[interaction.user.id]['%s' % self.category] = self.select.values
+        USER_CACHE[str(interaction.user.id)]['%s' % self.category] = self.select.values
         await interaction.response.defer()
 
     async def select_level_callback(self, interaction: Interaction):
-        USER_CACHE[interaction.user.id]['%s_level' % self.category] = self.level_select.values
+        USER_CACHE[str(interaction.user.id)]['%s_level' % self.category] = self.level_select.values
         await interaction.response.defer()
 
     async def submit_callback(self, interaction: Interaction):
-        userid = interaction.user.id
+        userid = str(interaction.user.id)
         level = USER_CACHE[userid]['%s_level' % self.category]
         mine = USER_CACHE[userid]['%s' % self.category]
         BOT_CACHE.save_user_selection(USER_CACHE)

@@ -56,6 +56,20 @@ class LOKWSS:
         return ret
     
     @property
+    def field_leave(self):
+        data = {"token":self.token}
+        ret = f'42["/field/leave", {json.dumps(data)}]'
+        self.logger.debug("send %s" % ret)
+        return ret
+    
+    def world_visit(self, world: int):
+        data = {'token': self.token, 'worldId': world}
+        encrypted_data = self.service.encryption(data)
+        ret = f'42["/world/visit/v3", {encrypted_data}]'
+        self.logger.debug("send %s" % ret)
+        return ret
+    
+    @property
     def zone_leave(self):
         data = {"world":self.world, "zones": json.dumps(self.last_zone)}
         ret=  f'42["/zone/leave/list/v2", "{json.dumps(data)}"]'
@@ -129,6 +143,17 @@ class LOKWSS:
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession() 
 
+    async def send_custom_ping(self, ws):
+        while True:
+            await asyncio.sleep(30)  
+            try:
+                await ws.send_str('2')  # Send custom ping
+            except asyncio.CancelledError:
+                print("Ping task cancelled.")
+            except Exception as e:
+                print(f"Failed to send ping: {e}")
+                return  
+            
     async def connect(self):
         """Connects to the WebSocket with retry logic."""
         await self.create_session()
@@ -140,8 +165,10 @@ class LOKWSS:
             self.last_zone = []
 
             try:
-                async with self.session.ws_connect(self.url, headers=WSS_HEADER, heartbeat=1.0, autoping=True) as ws:
+                async with self.session.ws_connect(self.url, headers=WSS_HEADER, heartbeat=None, autoping=False) as ws:
+                    ping_task = asyncio.create_task(self.send_custom_ping(ws))
                     SUCCESS = await self.listen(ws)
+                    
             except WSClosedException:
                 logging.warning("WS closed, retrying in 5 seconds")
             except aiohttp.ClientConnectorError:
@@ -150,23 +177,19 @@ class LOKWSS:
                 logging.warning(f"Handshake failed: {e}, retrying in 5 seconds")
             except Exception as e:
                 logging.warning(f"Unexpected exception: {e}", exc_info=True)
-            
+            finally:
+                ping_task.cancel()
+
             await asyncio.sleep(2)  # Wait before retrying
 
         return SUCCESS
+    
     async def listen(self, ws):
         """Handles incoming WebSocket messages."""
         init = False
-        start =  time.time()
-        # send 2 every 30 seconds
-        pause = False
 
         async for msg in ws:
             self.logger.debug(msg.data[:40])
-            if time.time() - start >30:
-                start = time.time()
-                pause = True
-                await ws.send_str('2')
 
             if msg.type == aiohttp.WSMsgType.CLOSED:
                 raise WSClosedException("WebSocket connection closed by server.")
@@ -183,11 +206,8 @@ class LOKWSS:
                 logging.error("unauthorized, kindly restart login session")
                 return False
             elif msg.data == '3':
-                pause = False
-                if self.pending_task:
-                    newzone = self.pending_task.popleft()
-                    await ws.send_str(self.zone_leave)
-                    await ws.send_str(self.zone_enter(newzone))
+                #this is 'pong' from 2
+                pass
 
             elif msg.data.startswith('42'):
                 if '/field/enter/v3' in msg.data:
@@ -206,8 +226,6 @@ class LOKWSS:
                 elif '/march/objects' in msg.data:
                     if not init:
                         init = True
-                    elif pause:
-                        continue
                     elif self.pending_task:
                         newzone = self.pending_task.popleft()
                         await ws.send_str(self.zone_leave)
@@ -216,8 +234,7 @@ class LOKWSS:
                         self.signal_stop = True
                         logging.info("wss finish updating mine database")
                         break
-                        # await asyncio.sleep(1)
-                        # await ws.send_str("2") 
+
             else:
                 logging.warning("unhandled msg")
 
@@ -227,3 +244,14 @@ class LOKWSS:
         SUCCESS = await self.connect()  
         await self.session.close()
         return SUCCESS
+
+if __name__ == '__main__':
+    user = "teezai4"
+    CACHED_LOGIN = f"src/cache/{user}.json"
+    js = json.load(open(CACHED_LOGIN))
+    accessToken = js.get("token")
+    regionHash = js.get("regionHash")
+    a = crypto()
+    a.update_salt(regionHash)
+    a.update_token(accessToken)
+    wss = LOKWSS(a, logger_name=user)

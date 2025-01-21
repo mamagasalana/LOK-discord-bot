@@ -35,9 +35,9 @@ class crypto:
 
     def encryption(self, plain_text):
         if isinstance(plain_text, dict):
-            plain_bytes = json.dumps(plain_text).encode('utf-8')
+            plain_bytes = json.dumps(plain_text).replace(' ', '').encode('utf-8')
         else:
-            plain_bytes = plain_text.encode('utf-8')
+            plain_bytes = plain_text.replace(' ', '').encode('utf-8')
         
         salt_key = self.salt
         salt_key_length = len(salt_key)

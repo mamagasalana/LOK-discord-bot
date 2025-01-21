@@ -1,0 +1,18 @@
+1. monitor https://play.leagueofkingdoms.com/Build/webgl.json to track changes in wasm
+2. download latest file with wasm_downloader.py
+3. use wasm2wat src/manual/test.wasm -o src/manual/test.wat
+4. use wat_index_increment.py to increment index 525
+
+5. in wat
+a. add
+  (import "env" "log" (func (;525;) (type 2)))
+  (import "env" "log2" (func (;526;) (type 11)))
+
+b. add
+  (export "_decryption" (func 70645))
+  (export "_before_decryption" (func 70644))
+
+c.
+    to review:  wasm2wat src/manual/test6.wasm -o src/manual/test7.wat
+
+6. recompile: wat2wasm src/manual/test7.wat -o src/manual/test6.wasm

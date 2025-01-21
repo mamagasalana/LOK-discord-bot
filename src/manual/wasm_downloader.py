@@ -3,6 +3,8 @@ import gzip
 import io
 import numpy as np
 import os
+
+VERSION = 121164948
 class lok_files_downloader:
 
     def __init__(self, debug=False):
@@ -42,12 +44,12 @@ class lok_files_downloader:
 if 1:
     lok = lok_files_downloader(True)
     # wasm file
-    if 1:
-        lok.download('https://play.leagueofkingdoms.com/Build/121164948.webgl.wasm.code.unityweb', os.path.join(*['src',  'manual','test.wasm'])) 
+    if 0:
+        lok.download(f'https://play.leagueofkingdoms.com/Build/{VERSION}.webgl.wasm.code.unityweb', os.path.join(*['testing',  'js_testing','test.wasm'])) 
     # this is data file
-    # lok.download('https://play.leagueofkingdoms.com/Build/121164948.webgl.data.unityweb', os.path.join(*['src',  'manual','test']))  
+    lok.download(f'https://play.leagueofkingdoms.com/Build/{VERSION}.webgl.data.unityweb', os.path.join(*['testing',  'js_testing','test']))  
     # this is the js file
-    # lok.download('https://play.leagueofkingdoms.com/Build/121164948.webgl.wasm.framework.unityweb', 'test') 
+    lok.download(f'https://play.leagueofkingdoms.com/Build/{VERSION}.webgl.wasm.framework.unityweb', 'test') 
 
 # 
 def process_data(content):

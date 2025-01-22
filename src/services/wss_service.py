@@ -6,6 +6,7 @@ import gzip
 import io
 from services.crypto_service import crypto
 from db.resources.mine import Mine
+from services.resourcefinder_service import ResourceFinder
 import datetime
 from collections import deque
 import time
@@ -27,16 +28,21 @@ WSS_HEADER = {
 }
 
 class LOKWSS:
-    def __init__(self, service:crypto, world=26, logger_name='wss'):
+    def __init__(self, service:crypto, world=26, logger_name='wss', sleep_interval: int =0):
+        """
+        sleep_interval : time taken between user movement simulation
+        """
         self.service = service
         self.session = None # Reuse session
         self.loop = asyncio.get_event_loop()
-        
+        self.sleep_interval = sleep_interval 
+
         self.last_zone = []
         self.wip_zone = deque()
         self.pending_task = deque()
-        self.world = world
+        self.world = int(world)
         self.signal_stop = False
+        self.signal_remaining = 999
         self.logger = setup_logger(logger_name, "logs/wss.log", level=logging.DEBUG)
 
     @property
@@ -57,30 +63,28 @@ class LOKWSS:
     
     @property
     def field_leave(self):
-        data = {"token":self.token}
-        ret = f'42["/field/leave", {json.dumps(data)}]'
-        self.logger.debug("send %s" % ret)
-        return ret
-    
-    def world_visit(self, world: int):
-        data = {'token': self.token, 'worldId': world}
-        encrypted_data = self.service.encryption(data)
-        ret = f'42["/world/visit/v3", {encrypted_data}]'
+        ret = '42["/field/leave", {"token":"%s"}]' % self.token
         self.logger.debug("send %s" % ret)
         return ret
     
     @property
-    def zone_leave(self):
-        data = {"world":self.world, "zones": json.dumps(self.last_zone)}
-        ret=  f'42["/zone/leave/list/v2", "{json.dumps(data)}"]'
-        self.logger.debug("send %s %s" % (json.dumps(data), ret))
+    def world_visit(self):
+        data = {'token': self.token, 'worldId': self.world}
+        encrypted_data = self.service.encryption(data)
+        ret = f'42["/world/visit/v3", "{encrypted_data}"]'
+        self.logger.debug("send %s" % ret)
+        return ret
+    
+    
+    def zone_leave(self, world:int):
+        ret= '42["/zone/leave/list/v2", {"world":%s, "zones":"%s"}]' % (world, json.dumps(self.last_zone))
+        self.logger.debug("send %s" % (ret))
         return ret
 
-    def zone_enter(self, zonelist:list):
-        self.wip_zone.append(self.last_zone)
-        new_zone  = zonelist
-        self.last_zone = new_zone
-        data = {"world":self.world, "zones": json.dumps(self.last_zone),"compType":3}
+    def zone_enter(self, zonelist:list, world:int):
+        self.wip_zone.append(zonelist)
+        self.last_zone = zonelist
+        data = {"world":world, "zones": json.dumps(self.last_zone),"compType":3}
         encrypted_data = self.service.encryption(data)
         ret = f'42["/zone/enter/list/v4", "{encrypted_data}"]'
         self.logger.debug("send %s %s" % (json.dumps(data), ret))
@@ -138,6 +142,8 @@ class LOKWSS:
 
         except Exception as e:
             logging.warning(f"Failed to decompress data: {e}", exc_info=True)
+        finally:
+            self.signal_remaining -=1
 
     async def create_session(self):
         if self.session is None or self.session.closed:
@@ -145,11 +151,40 @@ class LOKWSS:
 
     async def send_custom_ping(self, ws):
         while True:
-            await asyncio.sleep(30)  
+            await asyncio.sleep(25)  
             try:
                 await ws.send_str('2')  # Send custom ping
             except asyncio.CancelledError:
                 print("Ping task cancelled.")
+                return
+            except Exception as e:
+                print(f"Failed to send ping: {e}")
+                return  
+            
+    async def send_user_movement(self, ws):
+        if self.world != 26:
+            # switch world if world not 26
+            while self.signal_remaining:
+                await asyncio.sleep(0.1)
+
+            await ws.send_str(self.field_leave)
+            await ws.send_str(self.world_visit)
+            self.signal_remaining = 999
+
+        while self.pending_task:
+            await asyncio.sleep(self.sleep_interval)  
+
+            while self.signal_remaining:
+                await asyncio.sleep(0.1)
+
+            try:
+                newzone = self.pending_task.popleft()
+                await ws.send_str(self.zone_leave(self.world))
+                await ws.send_str(self.zone_enter(newzone, self.world))
+                self.signal_remaining +=1
+            except asyncio.CancelledError:
+                print("All task cancelled.")
+                return
             except Exception as e:
                 print(f"Failed to send ping: {e}")
                 return  
@@ -159,14 +194,15 @@ class LOKWSS:
         await self.create_session()
         SUCCESS = False
         while not self.signal_stop:
+            for zone in self.wip_zone:
+                self.pending_task.appendleft(zone)
             self.wip_zone.clear()
-            if self.last_zone:
-                self.pending_task.appendleft(self.last_zone)
             self.last_zone = []
 
             try:
                 async with self.session.ws_connect(self.url, headers=WSS_HEADER, heartbeat=None, autoping=False) as ws:
                     ping_task = asyncio.create_task(self.send_custom_ping(ws))
+                    movement_task = asyncio.create_task(self.send_user_movement(ws)) 
                     SUCCESS = await self.listen(ws)
                     
             except WSClosedException:
@@ -178,7 +214,10 @@ class LOKWSS:
             except Exception as e:
                 logging.warning(f"Unexpected exception: {e}", exc_info=True)
             finally:
-                ping_task.cancel()
+                if 'ping_task' in locals():
+                    ping_task.cancel()
+                if 'movement_task' in locals():
+                    movement_task.cancel()
 
             await asyncio.sleep(2)  # Wait before retrying
 
@@ -186,7 +225,6 @@ class LOKWSS:
     
     async def listen(self, ws):
         """Handles incoming WebSocket messages."""
-        init = False
 
         async for msg in ws:
             self.logger.debug(msg.data[:40])
@@ -214,23 +252,30 @@ class LOKWSS:
                     data = msg.data[2:]
                     js = await self.field_enter_out(data)
                     # receive response from initialize
-                    await ws.send_str(self.zone_leave)
-                    await ws.send_str(self.zone_enter([0, 64, 1, 65]))
-                    await ws.send_str(self.zone_leave)
-                    await ws.send_str(self.zone_enter(js['loc']))
+                    world = js['loc'][0]
+                    await ws.send_str(self.zone_leave(world))
+                    await ws.send_str(self.zone_enter([0, 64, 1, 65], world))
+                    await ws.send_str(self.zone_leave(world))
+                    castle_location = ResourceFinder.zone_adjacent(ResourceFinder.zone_from_xy(js['loc'][1], js['loc'][2]))
+                    await ws.send_str(self.zone_enter(castle_location, world))
+                    self.signal_remaining = 2
+
+                elif '/world/visit/v3' in msg.data:
+                    data = msg.data[2:]
+                    js = await self.field_enter_out(data)
+                    world = js['loc'][0]
+                    self.last_zone = []   #reset upon world switch
+                    await ws.send_str(self.zone_leave(world))
+                    castle_location = ResourceFinder.zone_adjacent(ResourceFinder.zone_from_xy(js['loc'][1], js['loc'][2]))
+                    await ws.send_str(self.zone_enter(castle_location, world))
+                    self.signal_remaining = 1
 
                 elif '/field/objects/v4' in msg.data:
                     data = msg.data[2:]
                     await self.field_object(data)
 
                 elif '/march/objects' in msg.data:
-                    if not init:
-                        init = True
-                    elif self.pending_task:
-                        newzone = self.pending_task.popleft()
-                        await ws.send_str(self.zone_leave)
-                        await ws.send_str(self.zone_enter(newzone))
-                    else:
+                    if not self.pending_task and not self.signal_remaining:
                         self.signal_stop = True
                         logging.info("wss finish updating mine database")
                         break
@@ -248,10 +293,14 @@ class LOKWSS:
 if __name__ == '__main__':
     user = "teezai4"
     CACHED_LOGIN = f"src/cache/{user}.json"
-    js = json.load(open(CACHED_LOGIN))
+    with open(CACHED_LOGIN, 'r') as ifile:
+        js = json.load(ifile)
     accessToken = js.get("token")
     regionHash = js.get("regionHash")
     a = crypto()
     a.update_salt(regionHash)
     a.update_token(accessToken)
-    wss = LOKWSS(a, logger_name=user)
+    wss = LOKWSS(a, world=24, logger_name=user, sleep_interval=1)
+    # wss = LOKWSS(a, logger_name=user, sleep_interval=1)
+    wss.pending_task.extend([ [0, 64, 1, 65], [2060, 2124, 2188, 2061, 2125, 2189, 2062, 2126, 2190]])
+    asyncio.run(wss.main())

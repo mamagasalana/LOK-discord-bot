@@ -23,6 +23,7 @@ class Mine(BaseModel):
 
 class UserLocation(BaseModel):
     _id = CharField(primary_key=True)
+    world = IntegerField()  
     x = IntegerField()  
     y = IntegerField()  
 

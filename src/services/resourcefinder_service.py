@@ -4,8 +4,14 @@ from typing import Union
 
 class ResourceFinder:
     @staticmethod
-    def set_user_location(discord_id, x, y):
-        entry = [{'_id': discord_id, 'x': x, 'y': y,}]
+    def get_user_location(discord_id):
+        u = UserLocation.select().where(UserLocation._id == discord_id).first()
+        if u:
+            return u.world
+
+    @staticmethod
+    def set_user_location(discord_id, world, x, y):
+        entry = [{'_id': discord_id, 'world': world, 'x': x, 'y': y,}]
         qry = UserLocation.insert_many(entry).on_conflict_replace()
         qry.execute()
 
@@ -31,6 +37,8 @@ class ResourceFinder:
     
     @staticmethod
     def get_mine_for_user(discord_user_id, mine_id: Union[list, list[int]], levels: Union[list, list[int]]):
+        u = UserLocation.select().where(UserLocation._id == discord_user_id).first()
+
         mines = Mine.select().where(
             (
                 (Mine.code.in_(mine_id)) if isinstance(levels, list) else (Mine.code == mine_id)
@@ -40,8 +48,9 @@ class ResourceFinder:
                 (Mine.level.in_(levels)) if isinstance(levels, list) else (Mine.level >= levels)
             )
             & (Mine.occupied== False)
+            & (Mine.world==(u.world if u else 24) )
         )
-        u = UserLocation.select().where(UserLocation._id == discord_user_id).first()
+        
         
         if not mines:
             return 
@@ -57,6 +66,8 @@ class ResourceFinder:
 
     @staticmethod
     def get_charm_for_user(discord_user_id, charm_id: Union[list, list[int]], levels: Union[list, list[int]]):
+        u = UserLocation.select().where(UserLocation._id == discord_user_id).first()
+
         charms = Mine.select().where(
             (
                 (Mine.charmcode.in_(charm_id)) if isinstance(levels, list) else (Mine.charmcode == charm_id)
@@ -66,8 +77,9 @@ class ResourceFinder:
                 (Mine.level.in_(levels)) if isinstance(levels, list) else (Mine.level >= levels)
             )
             & (Mine.occupied== False)
+            & (Mine.world==(u.world if u else 24 ))
         )
-        u = UserLocation.select().where(UserLocation._id == discord_user_id).first()
+        
         
         if not charms:
             return 
@@ -80,3 +92,32 @@ class ResourceFinder:
         else:
             for idx in range(0, len(charms), 10):
                 yield charms[idx: idx+10]
+    
+    @staticmethod
+    def zone_from_xy(x, y):
+        if (2048 > x >= 0) and (2048 > y >= 0):
+            return int(x/32) + int(y/32)*64
+        return -1
+    
+    @staticmethod
+    def zone_adjacent(zone):
+        fx = lambda x: [x-64, x , x +64]
+        
+        if zone % 64 == 0:
+            # left edge
+            out = fx(zone) + fx(zone+1)
+        elif zone % 63 == 0:
+            # right edge
+            out = fx(zone-1) + fx(zone)
+        else:
+            out = fx(zone-1) + fx(zone) + fx(zone+1) 
+        return [x for x in out if  4096 > x >=0 ]
+    
+
+if __name__ =='__main__':
+    a = ResourceFinder()
+    b = a.get_mine_for_user(1 , 20100104,1)
+    for y in b:
+        print([(x.world, x.x, x.y )for x in y])
+
+    print('debug')

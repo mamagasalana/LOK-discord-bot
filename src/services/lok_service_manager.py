@@ -1,10 +1,10 @@
-import datetime
+
 import logging
 import json
 import asyncio
 from db.resources.mine import Mine
-import time
 from services.lok_service import LokService
+from services.resourcefinder_service import ResourceFinder
 
 LOGIN_CONFIG = json.load(open('src/cache/LOGIN.json'))
 MAX_RUNNER =2 
@@ -26,30 +26,16 @@ class LokServiceManager:
     def get_active_workers(self):
         return [worker for worker in self.workers.values() if not worker.resting]
     
-    def zone_from_xy(self, x, y):
-        if (2048 > x >= 0) and (2048 > y >= 0):
-            return int(x/32) + int(y/32)*64
-        return -1
-        
-    def zone_adjacent(self, zone):
-        fx = lambda x: [x-64, x , x +64]
-        
-        if zone % 64 == 0:
-            # left edge
-            out = fx(zone) + fx(zone+1)
-        elif zone % 63 == 0:
-            # right edge
-            out = fx(zone-1) + fx(zone)
-        else:
-            out = fx(zone-1) + fx(zone) + fx(zone+1) 
-        return [x for x in out if  4096 > x >=0 ]
-    
+    def switch_world(self, world):
+        for worker in self.workers.values():
+            worker.switch_world(world)
+
     def check_entire_map(self, start_x = 0, start_y=2048, end_x=63, end_y=4096):
         #only covers top half of the map, y from 2048
         ret = []
         for y in range(start_y, end_y, 192):
             for x in range(start_x, end_x, 3):
-                ret.append(self.zone_adjacent(x+y+65))
+                ret.append(ResourceFinder.zone_adjacent(x+y+65))
         
         active_workers = self.get_active_workers
         part_size = len(ret) // len(active_workers) +1

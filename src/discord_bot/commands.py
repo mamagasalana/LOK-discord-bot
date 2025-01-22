@@ -95,12 +95,15 @@ class MoreContentView(View):
 class LocationModal(Modal):
     def __init__(self):
         super().__init__(title="Enter Coordinates: ")
+        self.loc_world = TextInput(label="world", placeholder="world")
         self.loc_x = TextInput(label="X", placeholder="X")
         self.loc_y = TextInput(label="Y", placeholder="Y")
 
+        self.loc_world.callback = self.text_callback
         self.loc_x.callback = self.text_callback
         self.loc_y.callback = self.text_callback
 
+        self.add_item(self.loc_world)
         self.add_item(self.loc_x)
         self.add_item(self.loc_y)
 
@@ -108,13 +111,14 @@ class LocationModal(Modal):
         await interaction.response.defer()
 
     async def on_submit(self, interaction: Interaction):
+        world = self.loc_world.value
         x = self.loc_x.value
         y = self.loc_y.value
         if not x.isnumeric() or not y.isnumeric():
             await interaction.response.send_message("Invalid coordinates. Please provide numeric values.", ephemeral=True)
             return
 
-        ResourceFinder.set_user_location(interaction.user.id, x, y)
+        ResourceFinder.set_user_location(interaction.user.id, world, x, y)
         await interaction.response.send_message("done", ephemeral=True)
 
 class LOKScreenerView(View):

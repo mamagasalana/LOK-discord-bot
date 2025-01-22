@@ -58,6 +58,8 @@ class LokService:
         
         return ret
         
+    def switch_world(self, world):
+        self.wss.world = int(world)
 
     async def start_wss(self):
         if self.status == 0: # Check if account got banned

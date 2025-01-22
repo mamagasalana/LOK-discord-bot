@@ -21,6 +21,7 @@ class LOKBOT:
         # self.lokServiceManager  =None
         # self.lokService = None
         self.lokServiceManager = LokServiceManager()
+        self.lokServiceManager.switch_world(24)
         self.lokService = self.lokServiceManager.get_worker('teezai3')# Initialize the LokService instance to handle external API interactions
         self.verify_button = None  # Button for user verification
         self.check_verification_mail_worker = None  # Task for periodic checking
@@ -140,12 +141,12 @@ class LOKBOT:
     @property
     def set_location_command(self):
         @app_commands.command(name="loc", description="set your lok location")
-        @app_commands.describe( x="x-coordinate", y="y-coordinate")
-        async def location(interaction: discord.Interaction, x: str, y: str):
+        @app_commands.describe(world="world", x="x-coordinate", y="y-coordinate")
+        async def location(interaction: discord.Interaction, world:str, x: str, y: str):
             if not x.isnumeric() or not y.isnumeric():
                 await interaction.response.send_message("Invalid coordinates. Please provide numeric values.", ephemeral=True)
                 return
-            ResourceFinder.set_user_location(interaction.user.id, x, y)
+            ResourceFinder.set_user_location(interaction.user.id, world, x, y)
             await interaction.response.send_message("done", ephemeral=True)
         return location
     
@@ -181,7 +182,12 @@ class LOKBOT:
     
     async def get_crystal_mine_signal2(self, interaction: discord.Interaction):
         now = datetime.datetime.now()
-        if now.hour == 0:
+        user = interaction.user.id
+        world = ResourceFinder.get_user_location(user)
+        if world:
+            self.lokServiceManager.switch_world(world)
+
+        if now.hour == 0 and now.minute < 20:
             # current server connection resets at 12
             await interaction.response.send_message("Server is sleeping, refuse to update database", ephemeral=True)
             return

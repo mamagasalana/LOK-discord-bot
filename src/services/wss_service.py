@@ -11,7 +11,7 @@ import datetime
 from collections import deque
 import time
 from config.logger import setup_logger
-
+import base64
 class WSClosedException(Exception):
     pass
 
@@ -28,7 +28,7 @@ WSS_HEADER = {
 }
 
 class LOKWSS:
-    def __init__(self, service:crypto, world=26, logger_name='wss', sleep_interval: int =0):
+    def __init__(self, service:crypto, world=24, logger_name='wss', sleep_interval: int =0):
         """
         sleep_interval : time taken between user movement simulation
         """
@@ -45,6 +45,14 @@ class LOKWSS:
         self.signal_remaining = 999
         self.logger = setup_logger(logger_name, "logs/wss.log", level=logging.DEBUG)
 
+    @property
+    def bot_origin_world(self):
+        header, payload, signature = self.token.split('.')
+        payload += '=' * ((4 - len(payload) % 4) % 4)  # Pad with '=' to make the base64 string length a multiple of 4
+        payload = base64.urlsafe_b64decode(payload)  # Decode base64
+        decoded_jwt = json.loads(payload)  # Convert JSON to Python dictionary
+        return int(decoded_jwt['worldId'])
+    
     @property
     def token(self):
         return self.service.accessToken
@@ -162,7 +170,7 @@ class LOKWSS:
                 return  
             
     async def send_user_movement(self, ws):
-        if self.world != 26:
+        if int(self.world) != self.bot_origin_world:
             # switch world if world not 26
             while self.signal_remaining:
                 await asyncio.sleep(0.1)
@@ -303,4 +311,4 @@ if __name__ == '__main__':
     wss = LOKWSS(a, world=24, logger_name=user, sleep_interval=1)
     # wss = LOKWSS(a, logger_name=user, sleep_interval=1)
     wss.pending_task.extend([ [0, 64, 1, 65], [2060, 2124, 2188, 2061, 2125, 2189, 2062, 2126, 2190]])
-    asyncio.run(wss.main())
+    # asyncio.run(wss.main())

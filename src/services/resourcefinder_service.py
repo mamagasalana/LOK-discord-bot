@@ -1,6 +1,7 @@
 
 from db.resources.mine import Mine, UserLocation
 from typing import Union
+from config.config import DEFAULT_WORLD
 
 class ResourceFinder:
     @staticmethod
@@ -48,7 +49,7 @@ class ResourceFinder:
                 (Mine.level.in_(levels)) if isinstance(levels, list) else (Mine.level >= levels)
             )
             & (Mine.occupied== False)
-            & (Mine.world==(u.world if u else 24) )
+            & (Mine.world==(u.world if u else DEFAULT_WORLD) )
         )
         
         
@@ -77,7 +78,7 @@ class ResourceFinder:
                 (Mine.level.in_(levels)) if isinstance(levels, list) else (Mine.level >= levels)
             )
             & (Mine.occupied== False)
-            & (Mine.world==(u.world if u else 24 ))
+            & (Mine.world==(u.world if u else DEFAULT_WORLD ))
         )
         
         

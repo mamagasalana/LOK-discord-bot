@@ -12,7 +12,7 @@ from services.lok_service_manager import LokServiceManager, LokService
 from services.resourcefinder_service import ResourceFinder
 from services.cache_service import BOT_CACHE
 
-from config.config import TOKEN, CHANNEL_ID, GUILD_ID, CODE_EXPIRY_TIME, USER, PASSWORD
+from config.config import TOKEN, CHANNEL_ID, GUILD_ID, CODE_EXPIRY_TIME, USER, PASSWORD, DEFAULT_WORLD
 from db.resources.lok_resource_map import LOK_RESOURCE_MAP_INVERSE, COMMAND_ABBREVIATION, CHARM_MAP
 
 class LOKBOT:
@@ -21,7 +21,7 @@ class LOKBOT:
         # self.lokServiceManager  =None
         # self.lokService = None
         self.lokServiceManager = LokServiceManager()
-        self.lokServiceManager.switch_world(24)
+        self.lokServiceManager.switch_world(DEFAULT_WORLD)
         self.lokService = self.lokServiceManager.get_worker('teezai3')# Initialize the LokService instance to handle external API interactions
         self.verify_button = None  # Button for user verification
         self.check_verification_mail_worker = None  # Task for periodic checking
@@ -51,17 +51,17 @@ class LOKBOT:
         bot.tree.clear_commands(guild=self.guild)
 
         bot.tree.add_command(self.title_command, guild=self.guild)
-        bot.tree.add_command(self.set_location_command, guild=self.guild)
-        bot.tree.add_command(self.charm_command, guild=self.guild)
-        for command_name in COMMAND_ABBREVIATION:
-            bot.tree.add_command(
-                discord.app_commands.Command(
-                    name=command_name,
-                    description="Request resource/monster",
-                    callback=self.resource_monster_command
-                ),
-                guild=self.guild
-            )
+        # bot.tree.add_command(self.set_location_command, guild=self.guild)
+        # bot.tree.add_command(self.charm_command, guild=self.guild)
+        # for command_name in COMMAND_ABBREVIATION:
+        #     bot.tree.add_command(
+        #         discord.app_commands.Command(
+        #             name=command_name,
+        #             description="Request resource/monster",
+        #             callback=self.resource_monster_command
+        #         ),
+        #         guild=self.guild
+        #     )
 
         @bot.event
         async def on_ready():
@@ -186,7 +186,9 @@ class LOKBOT:
         world = ResourceFinder.get_user_location(user)
         if world:
             self.lokServiceManager.switch_world(world)
-
+        else:
+            self.lokServiceManager.switch_world(DEFAULT_WORLD)
+            
         if now.hour == 0 and now.minute < 20:
             # current server connection resets at 12
             await interaction.response.send_message("Server is sleeping, refuse to update database", ephemeral=True)

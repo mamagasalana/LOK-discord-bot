@@ -26,6 +26,7 @@ def load_environment_variables() -> dict:
         "AWS_SECRET_ACCESS_KEY": load_env_variable("AWS_SECRET_ACCESS_KEY"),
         "AWS_REGION": load_env_variable("AWS_REGION", "ap-southeast-1"),
         "DYNAMO_DB_NAME": load_env_variable("DYNAMO_DB_NAME"),
+        "DEFAULT_WORLD" : load_env_variable("DEFAULT_WORLD")
     }
     
     return env_vars
@@ -46,3 +47,4 @@ AWS_ACCESS_KEY = environment_variables["AWS_ACCESS_KEY"]
 AWS_SECRET_ACCESS_KEY = environment_variables["AWS_SECRET_ACCESS_KEY"]
 AWS_REGION = environment_variables["AWS_REGION"]
 DYNAMO_DB_NAME = environment_variables["DYNAMO_DB_NAME"]
+DEFAULT_WORLD = environment_variables["DEFAULT_WORLD"]

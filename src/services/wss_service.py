@@ -158,7 +158,7 @@ class LOKWSS:
             self.session = aiohttp.ClientSession() 
 
     async def send_custom_ping(self, ws):
-        while True:
+        while self.pending_task:
             await asyncio.sleep(25)  
             try:
                 await ws.send_str('2')  # Send custom ping
@@ -173,7 +173,7 @@ class LOKWSS:
         if int(self.world) != self.bot_origin_world:
             # switch world if world not 26
             while self.signal_remaining:
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.0)
 
             await ws.send_str(self.field_leave)
             await ws.send_str(self.world_visit)
@@ -183,7 +183,7 @@ class LOKWSS:
             await asyncio.sleep(self.sleep_interval)  
 
             while self.signal_remaining:
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.0)
 
             try:
                 newzone = self.pending_task.popleft()
@@ -211,21 +211,14 @@ class LOKWSS:
                 async with self.session.ws_connect(self.url, headers=WSS_HEADER, heartbeat=None, autoping=False) as ws:
                     ping_task = asyncio.create_task(self.send_custom_ping(ws))
                     movement_task = asyncio.create_task(self.send_user_movement(ws)) 
-                    SUCCESS = await self.listen(ws)
-                    
-            except WSClosedException:
-                logging.warning("WS closed, retrying in 5 seconds")
-            except aiohttp.ClientConnectorError:
-                logging.warning("WS connection error, retrying in 5 seconds")
-            except aiohttp.WSServerHandshakeError as e:
-                logging.warning(f"Handshake failed: {e}, retrying in 5 seconds")
+                    listen_task = asyncio.create_task(self.listen(ws))
+                    results = await asyncio.gather(ping_task, movement_task, listen_task, return_exceptions=True)
+                    SUCCESS = results[2]
+
+            except (WSClosedException, aiohttp.ClientConnectorError, aiohttp.WSServerHandshakeError) as e:
+                logging.warning(f"Connection issue: {e}, retrying in 5 seconds")
             except Exception as e:
                 logging.warning(f"Unexpected exception: {e}", exc_info=True)
-            finally:
-                if 'ping_task' in locals():
-                    ping_task.cancel()
-                if 'movement_task' in locals():
-                    movement_task.cancel()
 
             await asyncio.sleep(2)  # Wait before retrying
 
@@ -285,11 +278,14 @@ class LOKWSS:
                 elif '/march/objects' in msg.data:
                     if not self.pending_task and not self.signal_remaining:
                         self.signal_stop = True
+                        await asyncio.sleep(0.0)
                         logging.info("wss finish updating mine database")
                         break
 
             else:
                 logging.warning("unhandled msg")
+
+            await asyncio.sleep(0.0)
 
         return True
     async def main(self):
@@ -299,7 +295,7 @@ class LOKWSS:
         return SUCCESS
 
 if __name__ == '__main__':
-    user = "teezai4"
+    user = "teezai9"
     CACHED_LOGIN = f"src/cache/{user}.json"
     with open(CACHED_LOGIN, 'r') as ifile:
         js = json.load(ifile)
@@ -311,4 +307,4 @@ if __name__ == '__main__':
     wss = LOKWSS(a, world=24, logger_name=user, sleep_interval=1)
     # wss = LOKWSS(a, logger_name=user, sleep_interval=1)
     wss.pending_task.extend([ [0, 64, 1, 65], [2060, 2124, 2188, 2061, 2125, 2189, 2062, 2126, 2190]])
-    # asyncio.run(wss.main())
+    asyncio.run(wss.main())

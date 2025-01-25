@@ -52,3 +52,16 @@ for k,v in LOK_RESOURCE_MAP.items():
             continue
         new_id = '%s%s' % (HEADER_MAP.get(header), k[0].lower())
         COMMAND_ABBREVIATION[new_id] = v
+
+
+NOT_RESOURCE_MAP = {
+    20300101: 2 ,  #2x2, 'user' 
+    20600101: 2,  #2x2, 'alliance_centre'
+    20600102: 1, #1x1, 'alliance_tower'
+    20600103: 1, # 1x1, 'alliance_outpost'
+    20400101: 9, # 9x9, 'congress':
+    20400201: 7, # 7x7, 'shrine3'
+    20400301: 7, # 7x7, 'shrine2'
+    20400401: 7, # 7x7, 'shrine1'
+    }
+

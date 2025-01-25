@@ -122,25 +122,30 @@ class LOKWSS:
             out = self.service.decryption(decompressed_data)
             out2 = []
             for x in out['objects']:
+                # if x.get('expired'):
+                expiry = datetime.datetime(1970,1,1)
                 if x.get('expired'):
-                    charmcode = -1
-                    if 'param' in x:
-                        if 'charmCode' in x['param']:
-                            charmcode = int(str(x['param']['charmCode'])[:-2])
-                    out2.append({
-                        'expiry': datetime.datetime.strptime(x.get('expired')[:19], '%Y-%m-%dT%H:%M:%S'),
-                        'date': datetime.datetime.now(),
-                        '_id': x.get('_id'),
-                        'level': x.get('level'),
-                        'code': x.get('code'),
-                        'extra': json.dumps(x),
-                        'charmcode' : charmcode,
-                        'state': x.get('state'),
-                        'world': x.get('loc')[0],
-                        'x': x.get('loc')[1],
-                        'y': x.get('loc')[2],
-                        'occupied': 'occupied' in x
-                    })
+                    expiry = datetime.datetime.strptime(x.get('expired')[:19], '%Y-%m-%dT%H:%M:%S')
+                        
+                charmcode = -1
+                if 'param' in x:
+                    if 'charmCode' in x['param']:
+                        charmcode = int(str(x['param']['charmCode'])[:-2])
+
+                out2.append({
+                    'expiry': expiry,
+                    'date': datetime.datetime.now(),
+                    '_id': x.get('_id'),
+                    'level': x.get('level'),
+                    'code': x.get('code'),
+                    'extra': json.dumps(x),
+                    'charmcode' : charmcode,
+                    'state': x.get('state'),
+                    'world': x.get('loc')[0],
+                    'x': x.get('loc')[1],
+                    'y': x.get('loc')[2],
+                    'occupied': 'occupied' in x
+                })
 
             if out2:
                 qry = Mine.insert_many(out2).on_conflict_ignore()

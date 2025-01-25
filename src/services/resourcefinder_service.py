@@ -1,5 +1,6 @@
 
 from db.resources.mine import Mine, UserLocation
+from db.resources.lok_resource_map import NOT_RESOURCE_MAP
 from typing import Union
 from config.config import DEFAULT_WORLD
 
@@ -36,9 +37,11 @@ class ResourceFinder:
                                 & (Mine.level >=level))
         return r
     
-    @staticmethod
-    def get_mine_for_user(discord_user_id, mine_id: Union[list, list[int]], levels: Union[list, list[int]]):
+    @classmethod
+    def get_mine_for_user(cls, discord_user_id, mine_id: Union[list, list[int]], levels: Union[list, list[int]]):
         u = UserLocation.select().where(UserLocation._id == discord_user_id).first()
+        world  = u.world if u else DEFAULT_WORLD 
+        invisble = cls.location_invisible(world)
 
         mines = Mine.select().where(
             (
@@ -49,13 +52,14 @@ class ResourceFinder:
                 (Mine.level.in_(levels)) if isinstance(levels, list) else (Mine.level >= levels)
             )
             & (Mine.occupied== False)
-            & (Mine.world==(u.world if u else DEFAULT_WORLD) )
+            & (Mine.world==world )
         )
         
         
         if not mines:
             return 
         
+        mines = [ mine for mine in mines if [mine.x, mine.y] not in invisble]
         if u:
             get_distance = lambda x, y: ((x-u.x )**2+(y-u.y)**2)**0.5
             sorted_mines = sorted(mines, key=lambda x: get_distance(x.x, x.y))
@@ -65,9 +69,11 @@ class ResourceFinder:
             for idx in range(0, len(mines), 10):
                 yield mines[idx: idx+10]
 
-    @staticmethod
-    def get_charm_for_user(discord_user_id, charm_id: Union[list, list[int]], levels: Union[list, list[int]]):
+    @classmethod
+    def get_charm_for_user(cls, discord_user_id, charm_id: Union[list, list[int]], levels: Union[list, list[int]]):
         u = UserLocation.select().where(UserLocation._id == discord_user_id).first()
+        world  = u.world if u else DEFAULT_WORLD 
+        invisble = cls.location_invisible(world)
 
         charms = Mine.select().where(
             (
@@ -78,13 +84,15 @@ class ResourceFinder:
                 (Mine.level.in_(levels)) if isinstance(levels, list) else (Mine.level >= levels)
             )
             & (Mine.occupied== False)
-            & (Mine.world==(u.world if u else DEFAULT_WORLD ))
+            & (Mine.world==world)
         )
         
         
         if not charms:
             return 
         
+        mines = [ mine for mine in mines if [mine.x, mine.y] not in invisble]
+
         if u:
             get_distance = lambda x, y: ((x-u.x )**2+(y-u.y)**2)**0.5
             sorted_charms = sorted(charms, key=lambda x: get_distance(x.x, x.y))
@@ -114,10 +122,28 @@ class ResourceFinder:
             out = fx(zone-1) + fx(zone) + fx(zone+1) 
         return [x for x in out if  4096 > x >=0 ]
     
+    @staticmethod
+    def location_invisible(world):
+        keys = list(NOT_RESOURCE_MAP.keys())
+        invisible_loc = []
+        inv_locs = Mine.select().where((Mine.code.in_(keys)) & (Mine.world == world))
+        for mine in inv_locs:
+            size = NOT_RESOURCE_MAP.get(mine.code)
+            if size == 2:
+                for x in range(mine.x, mine.x + size):
+                    for y in range(mine.y, mine.y + size):
+                        invisible_loc.append([x,y])
+            else:
+                # loc as centre
+                size2 = (size -1 )//2
+                for x in range(mine.x - size2, mine.x + size2+1):
+                    for y in range(mine.y - size2, mine.y + size2+1):
+                        invisible_loc.append([x,y])
+        return invisible_loc
 
 if __name__ =='__main__':
     a = ResourceFinder()
-    b = a.get_mine_for_user(1 , 20100104,1)
+    b = a.get_mine_for_user(622821673028026409 , 20100104,1)
     for y in b:
         print([(x.world, x.x, x.y )for x in y])
 

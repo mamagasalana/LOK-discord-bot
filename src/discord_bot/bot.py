@@ -218,6 +218,7 @@ class LOKBOT:
         timespent = datetime.datetime.now() - now
         minutes = timespent.seconds // 60
         seconds = timespent.seconds % 60
+        logging.info(f"Database update complete. Used {minutes} minutes and {seconds} seconds.")
         await interaction.followup.send(f"Database update complete. Used {minutes} minutes and {seconds} seconds.", ephemeral=True)
         self.CRYSTAL_MINE_LOADING = False
 

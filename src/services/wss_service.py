@@ -155,16 +155,19 @@ class LOKWSS:
 
         except Exception as e:
             logging.warning(f"Failed to decompress data: {e}", exc_info=True)
-        finally:
-            self.signal_remaining -=1
+
 
     async def create_session(self):
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession() 
 
-    async def send_custom_ping(self, ws):
+    async def send_custom_ping(self, ws: aiohttp.ClientWebSocketResponse):
         while self.pending_task:
-            await asyncio.sleep(25)  
+
+            for _ in range(25):
+                if not self.pending_task:
+                    return
+                await asyncio.sleep(1)  
             try:
                 await ws.send_str('2')  # Send custom ping
             except asyncio.CancelledError:
@@ -174,7 +177,7 @@ class LOKWSS:
                 print(f"Failed to send ping: {e}")
                 return  
             
-    async def send_user_movement(self, ws):
+    async def send_user_movement(self, ws: aiohttp.ClientWebSocketResponse):
         if int(self.world) != self.bot_origin_world:
             # switch world if world not 26
             while self.signal_remaining:
@@ -211,7 +214,8 @@ class LOKWSS:
                 self.pending_task.appendleft(zone)
             self.wip_zone.clear()
             self.last_zone = []
-
+            self.signal_remaining = 999
+            
             try:
                 async with self.session.ws_connect(self.url, headers=WSS_HEADER, heartbeat=None, autoping=False) as ws:
                     ping_task = asyncio.create_task(self.send_custom_ping(ws))
@@ -221,7 +225,7 @@ class LOKWSS:
                     SUCCESS = results[2]
 
             except (WSClosedException, aiohttp.ClientConnectorError, aiohttp.WSServerHandshakeError) as e:
-                logging.warning(f"Connection issue: {e}, retrying in 5 seconds")
+                logging.warning(f"Connection issue: {e}, retrying in 5 seconds", exc_info=True)
             except Exception as e:
                 logging.warning(f"Unexpected exception: {e}", exc_info=True)
 
@@ -281,6 +285,7 @@ class LOKWSS:
                     await self.field_object(data)
 
                 elif '/march/objects' in msg.data:
+                    self.signal_remaining -=1
                     if not self.pending_task and not self.signal_remaining:
                         self.signal_stop = True
                         await asyncio.sleep(0.0)

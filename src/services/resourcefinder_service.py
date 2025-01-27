@@ -91,7 +91,7 @@ class ResourceFinder:
         if not charms:
             return 
         
-        mines = [ mine for mine in mines if [mine.x, mine.y] not in invisble]
+        charms = [ mine for mine in charms if [mine.x, mine.y] not in invisble]
 
         if u:
             get_distance = lambda x, y: ((x-u.x )**2+(y-u.y)**2)**0.5

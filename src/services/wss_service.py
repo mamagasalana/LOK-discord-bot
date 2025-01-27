@@ -24,7 +24,7 @@ WSS_HEADER = {
     "Origin": "https://play.leagueofkingdoms.com",
     "Pragma": "no-cache",
     "Upgrade": "websocket",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36"
 }
 
 class LOKWSS:
@@ -209,6 +209,7 @@ class LOKWSS:
         """Connects to the WebSocket with retry logic."""
         await self.create_session()
         SUCCESS = False
+        loop = asyncio.get_event_loop()
         while not self.signal_stop:
             for zone in self.wip_zone:
                 self.pending_task.appendleft(zone)
@@ -217,20 +218,24 @@ class LOKWSS:
             self.signal_remaining = 999
             
             try:
-                async with self.session.ws_connect(self.url, headers=WSS_HEADER, heartbeat=None, autoping=False) as ws:
-                    ping_task = asyncio.create_task(self.send_custom_ping(ws))
-                    movement_task = asyncio.create_task(self.send_user_movement(ws)) 
-                    listen_task = asyncio.create_task(self.listen(ws))
-                    results = await asyncio.gather(ping_task, movement_task, listen_task, return_exceptions=True)
-                    SUCCESS = results[2]
+                async with self.session.ws_connect(self.url, headers=WSS_HEADER, heartbeat=None, autoping=False, receive_timeout=30) as ws:
+                    ping_task = loop.create_task(self.send_custom_ping(ws))
+                    movement_task = loop.create_task(self.send_user_movement(ws)) 
+                    SUCCESS =  await self.listen(ws)
 
             except (WSClosedException, aiohttp.ClientConnectorError, aiohttp.WSServerHandshakeError) as e:
                 logging.warning(f"Connection issue: {e}, retrying in 5 seconds", exc_info=True)
+                await asyncio.sleep(5)  # Wait before retrying
             except Exception as e:
                 logging.warning(f"Unexpected exception: {e}", exc_info=True)
-
-            await asyncio.sleep(2)  # Wait before retrying
-
+                await asyncio.sleep(5)  # Wait before retrying
+            finally:
+                if 'ping_task' in locals() and not ping_task.done():
+                    ping_task.cancel()
+                
+                if 'movement_task' in locals() and not movement_task.done():
+                    movement_task.cancel()
+    
         return SUCCESS
     
     async def listen(self, ws):

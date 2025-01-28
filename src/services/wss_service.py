@@ -181,7 +181,7 @@ class LOKWSS:
         if int(self.world) != self.bot_origin_world:
             # switch world if world not 26
             while self.signal_remaining:
-                await asyncio.sleep(0.0)
+                await asyncio.sleep(0.1)
 
             await ws.send_str(self.field_leave)
             await ws.send_str(self.world_visit)
@@ -191,7 +191,7 @@ class LOKWSS:
             await asyncio.sleep(self.sleep_interval)  
 
             while self.signal_remaining:
-                await asyncio.sleep(0.0)
+                await asyncio.sleep(0.1)
 
             try:
                 newzone = self.pending_task.popleft()
@@ -300,7 +300,7 @@ class LOKWSS:
             else:
                 logging.warning("unhandled msg")
 
-            await asyncio.sleep(0.0)
+            await asyncio.sleep(0.1)
 
         return True
     async def main(self):

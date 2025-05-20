@@ -3,14 +3,23 @@ import gzip
 import io
 import numpy as np
 import os
+from urllib.parse import urljoin
 
-VERSION = 121164948
 class lok_files_downloader:
 
     def __init__(self, debug=False):
         self.session = requests.Session()
         r = self.session.get('https://play.leagueofkingdoms.com/')
         self.debug=debug
+        self.get_version()
+
+    def get_version(self):
+        url_version = 'https://play.leagueofkingdoms.com/Build/webgl.json'
+        r = self.session.get(url_version)
+        js = r.json()
+        self.dataurl = urljoin(url_version, js['dataUrl'] )
+        self.wasmurl = urljoin(url_version, js['wasmCodeUrl'] )
+        self.wasmframeurl = urljoin(url_version, js['wasmFrameworkUrl']) 
 
     def decompress_gzip_from_bytes(self, data):
         try:
@@ -44,12 +53,12 @@ class lok_files_downloader:
 if 1:
     lok = lok_files_downloader(True)
     # wasm file
-    if 0:
-        lok.download(f'https://play.leagueofkingdoms.com/Build/{VERSION}.webgl.wasm.code.unityweb', os.path.join(*['testing',  'js_testing','test.wasm'])) 
-    # this is data file
-    lok.download(f'https://play.leagueofkingdoms.com/Build/{VERSION}.webgl.data.unityweb', os.path.join(*['testing',  'js_testing','test']))  
-    # this is the js file
-    lok.download(f'https://play.leagueofkingdoms.com/Build/{VERSION}.webgl.wasm.framework.unityweb', 'test') 
+    # lok.download(lok.wasmurl, os.path.join(*['testing',  'js_testing','test.wasm'])) 
+    lok.download(lok.wasmurl, "/home/ytee/test/wasmtest/test.wasm")
+    # # this is data file
+    # lok.download(f'https://play.leagueofkingdoms.com/Build/{VERSION}.webgl.data.unityweb', os.path.join(*['testing',  'js_testing','test']))  
+    # # this is the js file
+    # lok.download(f'https://play.leagueofkingdoms.com/Build/{VERSION}.webgl.wasm.framework.unityweb', 'test') 
 
 # 
 def process_data(content):
@@ -91,4 +100,4 @@ def process_data(content):
         with open(fpath,'wb') as ofile:
             ofile.write(content[s:s + d])
 
-process_data(open(os.path.join(*['testing',  'js_testing','test']), 'rb').read())
+# process_data(open(os.path.join(*['testing',  'js_testing','test']), 'rb').read())

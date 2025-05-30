@@ -54,7 +54,9 @@ if 1:
     lok = lok_files_downloader(True)
     # wasm file
     # lok.download(lok.wasmurl, os.path.join(*['testing',  'js_testing','test.wasm'])) 
-    lok.download(lok.wasmurl, "test.wasm")
+    # lok.download(lok.wasmurl, "test.wasm")
+
+
     # # this is data file
     # lok.download(f'https://play.leagueofkingdoms.com/Build/{VERSION}.webgl.data.unityweb', os.path.join(*['testing',  'js_testing','test']))  
     # # this is the js file
@@ -100,4 +102,5 @@ def process_data(content):
         with open(fpath,'wb') as ofile:
             ofile.write(content[s:s + d])
 
-# process_data(open(os.path.join(*['testing',  'js_testing','test']), 'rb').read())
+lok.download(lok.dataurl, os.path.join(*['testing',  'js_testing','test']))
+process_data(open(os.path.join(*['testing',  'js_testing','test']), 'rb').read())

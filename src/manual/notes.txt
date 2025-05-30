@@ -16,3 +16,99 @@ c.
     to review:  wasm2wat src/manual/test6.wasm -o src/manual/test7.wat
 
 6. recompile: wat2wasm src/manual/test7.wat -o src/manual/test6.wasm
+
+
+########################################################################
+# TO DEBUG WASM
+########################################################################
+
+1. find a debug point that lok receive encrypted message:
+Example:
+socket.socketImpl.onmessage = (function(e) {
+    if (e.data instanceof ArrayBuffer) {
+        var byteArray = new Uint8Array(e.data);
+        var buffer = _malloc(byteArray.length);
+        HEAPU8.set(byteArray, buffer);
+        Runtime.dynCall("viii", onBinary, [id, buffer, byteArray.length]);
+        _free(buffer)
+    } else {
+        var length = lengthBytesUTF8(e.data) + 1;
+        var buffer = _malloc(length);
+        stringToUTF8Array(e.data, HEAPU8, buffer, length);
+        Runtime.dynCall("vii", onText, [id, buffer]);
+        _free(buffer)
+    }
+}
+
+2. however, lok dont decrypt the encrypted text directly, it only saves the message to heap memory for later use
+Find a recurring function (it keep repeat to check for events)
+Example1:
+safeSetInterval: (function(func, timeout) {
+                Module["noExitRuntime"] = true;
+                return setInterval((function() {
+                    if (ABORT)
+                        return;
+                    if (Browser.allowAsyncCallbacks) {
+                        func()
+                    }
+                }
+                ), timeout)
+            }
+            ),
+Example2:
+var browserIterationFunc;
+if (typeof arg !== "undefined") {
+    browserIterationFunc = (function() {
+        Module["dynCall_vi"](func, arg)
+    }
+    )
+} else {
+    browserIterationFunc = (function() {
+        Module["dynCall_v"](func)
+    }
+    )
+}
+        
+3. add a breakpoint and run this in browser console to download the binaries
+( run once after debug point 1, run few times at debug point 2)
+js:
+blob = new Blob([HEAP8], { type: "application/octet-stream" });
+link = document.createElement("a");
+link.href = URL.createObjectURL(blob);
+link.download = "1.bin";
+document.body.appendChild(link);
+
+
+4. compare the binaries, the template is ready in wasm_debugger.compare_binaries
+look for message that is successfully decrypted
+now you know  Module["dynCall_v"](func) was the key to decrypt
+
+indexes: 275324944 : 275327108
+binary_old: b'2025-05-25T07:23:08.598Z'
+binary_new: b'compType":0,"packs":{"objects":[{"_id":"6832c4703c974459ee3f290c","marchType":1,"kingdomId":"637f738e680fac3f23ac2d8a","allianceId":"61e5ce1e4286b11194e19a43","isBF":false,"isCVC":false,"isMI":false,"param":{"foId":"6832623f5261a6a5773ff3b0","foCode":20100106,"foLoc":[26,160,1700],"foLevel":3,"targetValue":3000},"fromLoc":[26,1000,1040],"toLoc":[26,160,1700],"startTime":"2025-05-25T07:23:08.598Z","endTime":"2025-05-25T13:17:49.598Z","state":2,"distance":1069,"time":21281,"isRally":false,"useBoost":false,"drago":{"_id":"6467bc775811d7a34fe0c930","tokenId":28488,"fusion":3,"grade":0,"level":25,"parts":[{"code":6,"attr":0,"grade":1,"_id":"6832c4703c974459ee3f29f8"},{"code":1,"attr":0,"grade":1,"_id":"6832c4703c974459ee3f29f9"},{"code":3,"attr":0,"grade":1,"_id":"6832c4703c974459ee3f29fa"},{"code":8,"attr":0,"grade":1,"_id":"6832c4703c974459ee3f29fb"},{"code":3,"attr":0,"grade":1,"_id":"6832c4703c974459ee3f29fc"},{"code":3,"attr":0,"grade":1,"_id":"6832c4703c974459ee3f29fd"},{"code":2,"attr":0,"grade":1,"_id":"6832c4703c974459ee3f29fe"}]},"troops":[{"code":50100306}]}]}}'
+
+5. use wasm_downloader to download the wasm file
+
+6. use wasm_debugger.run to modify wasm file for debug 
+    this will create a sample python script for wasm debug, (with testout.wasm and testout.wat) 
+
+7. run  Module["dynCall_v"](func) locally in python, translate each when necessary
+repeat this until the output binary contains decrypted message
+
+8. dive deep until you spot the decryption function
+ - First, spot the indexes where HEAP8 contains decrypted message
+ - run  Module["dynCall_v"](func) locally in python, monitor HEAP8 with the indexes until decrypted message appear, then early exit
+ - trigger python exception intentionally to check the stack trace to locate the function in wasm level
+    Example:
+    0: 0x1bad110 - <unknown>!<wasm function 90456>
+    1: 0x1bad60d - <unknown>!<wasm function 90466>
+    2: 0x18de56c - <unknown>!<wasm function 79894>
+    3: 0xfdac8d - <unknown>!<wasm function 37091>
+    4: 0x1c1aa6d - <unknown>!<wasm function 92602>
+    5: 0x1c1a7e7 - <unknown>!<wasm function 92601>
+-  modify the testout.wat with (log1, log2 ) for early exit in wasm level to further trace the exact function
+- testout.wat can recompile to new testout.wasm using syntax "wat2wasm testout.wat -o testout.wasm"
+
+
+
+9. now find how the salt is created

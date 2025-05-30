@@ -1,5 +1,8 @@
 import re 
 import subprocess
+import os
+import numpy as np
+
 
 WASMBASE_HEADER = """
 import math
@@ -178,8 +181,7 @@ class wasm_debug:
         funcs = []
         func_types = {}
         with open(self.IFILE, 'r') as ifile:
-            rows = ifile.readlines()
-            for row in rows:
+            for row in ifile:
                 if '(import' in row: # from wat
                     funcs.append(row)
                 if '(export' in row: # from wat
@@ -271,8 +273,83 @@ class wasm_debug:
         self.add_debug_line()
         self.create_new_wasmbase()
         subprocess.run(['wat2wasm', self.OFILE, '-o', self.outwasm], check=True)
+        subprocess.run(['wasm2wat', self.outwasm, '-o', self.OFILE], check=True) # cleaning
+
+    def generate_func_map(self):
+        with open(self.OFILE, 'r') as ifile:
+            for row in ifile:
+                if '(elem (;0;)' in row:
+                    break
+            
+        all_funcs = re.findall(r'\d+', row[row.find('func'):])
+        with open('funcidx.csv', 'w') as ofile:
+            for idx, func in enumerate(all_funcs):
+                ofile.write(f"{idx},{func}\n")
+
+    def get_file(self, fname):
+        with open(os.path.join(fname), 'rb') as ifile:
+            txt = ifile.read()
+            return np.frombuffer(txt, dtype=np.int8)
+        
+    def compare_binaries(self, file_before, file_after):
+        arr1 = self.get_file(file_before)
+        arr2 = self.get_file(file_after)
+        diff_indices = np.where(arr1 != arr2)[0]
+
+        gap_size = 1  # You can adjust this value based on the gap tolerance you want
+
+        if diff_indices.size > 0:
+            # Find continuous segments allowing for a gap of `gap_size`
+            continuous_segments = np.split(diff_indices, np.where(np.diff(diff_indices) > gap_size)[0] + 1)
+        print(len(continuous_segments))
+
+        out = []
+        last = None
+        for x in continuous_segments:
+            if last is None:
+                last= x
+                continue
+            
+            if last[-1] + 2 == x[0]:
+                last = np.concatenate((last, x))
+            elif x[0] - last[-1] > 4:
+                lref = []
+                lx = last[-1]
+                match = True
+                while lx < x[0]:
+                    lx+=2
+                    if arr1[lx] == 0 and arr2[lx] == 0:
+                        lref.append(lx)
+                    else:
+                        match = False
+                        break
+                if match:
+                    last = np.concatenate((last, np.array(lref), x))
+                else:
+                    out.append(last)
+                    last= x
+
+
+        out.append(last)
+        
+        for idx, x in enumerate(out):
+            a = bytes(arr1[x])
+            b = bytes(arr2[x])
+            
+            a2 = a.replace(b'\x00', b'')
+            b2 = b.replace(b'\x00', b'')
+            
+            
+            if b'{' in  b2:
+                print(x[0], ':', x[-1])
+                print(a2)
+                print(b2)
+                # print(np.frombuffer(b2, dtype=np.int8))
+                # print(len(b2))
+                print('#####################\n')
+
 
 
 if __name__ =='__main__':
     a = wasm_debug()
-    a.create_new_wasmbase()
+    a.run()

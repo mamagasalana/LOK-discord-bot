@@ -6,7 +6,7 @@ from config.config import CODE_EXPIRY_TIME, DYNAMO_DB_NAME
 from db.repository.verification_code_repository import VerificationCodeRepository
 from discord import Interaction, ButtonStyle, SelectOption
 from db.resources.lok_resource_map import LOK_RESOURCE_MAP_INVERSE, LOK_RESOURCE_MAP, HEADER_MAP, CHARM_MAP_INVERSE, CHARM_MAP
-from discord_bot.autocomplete import ALLOWED_CHARM, ALLOWED_MONSTER, ALLOWED_RESOURCES
+from discord_bot.autocomplete import ALLOWED_CHARM, ALLOWED_MONSTER, ALLOWED_RESOURCES, ALLOWED_CRYSTAL
 from db.resources.mine import Mine
 from typing import Iterator
 from services.resourcefinder_service import ResourceFinder
@@ -125,24 +125,40 @@ class LOKScreenerView(View):
     def __init__(self, crystal_mine_callback):
         # Set timeout=None for persistent view
         super().__init__(timeout=None)
-        b_resource = Button(label="Resource Screener", style=ButtonStyle.primary, custom_id="main:open_form1")
-        b_monster = Button(label="Monster Screener", style=ButtonStyle.primary, custom_id="main:open_form2")
-        b_charm = Button(label="Charm Screener", style=ButtonStyle.primary, custom_id="main:open_form3")
-        b_loc = Button(label="Set Location", style=ButtonStyle.primary, custom_id="main:open_form4")
-        b_update = Button(label="Update Database", style=ButtonStyle.primary, custom_id="main:open_form5")
+
+
+        b_monster = Button(label="Monster Screener", style=ButtonStyle.primary, custom_id="main:open_form2", row=1)
+        b_charm = Button(label="Charm Screener", style=ButtonStyle.primary, custom_id="main:open_form3", row=2)
+        b_loc = Button(label="Set Location", style=ButtonStyle.primary, custom_id="main:open_form4", row=0)
+        b_update = Button(label="Update Database", style=ButtonStyle.primary, custom_id="main:open_form5", row=0)
+        
+        b_crystal = Button(label="Quick Crystal", style=ButtonStyle.primary, custom_id="main:open_form6", row=3)
+        b_resource2 = Button(label="Quick Resources", style=ButtonStyle.primary, custom_id="main:open_form7", row=3)
+        b_resource = Button(label="Resource Screener", style=ButtonStyle.primary, custom_id="main:open_form1", row=3)
 
         b_resource.callback = self.open_form_resource
+        b_resource2.callback = self.open_form_resource2
+        b_crystal.callback = self.open_form_crystal
+
         b_monster.callback = self.open_form_monster
         b_charm.callback = self.open_form_charm
         b_loc.callback = self.open_form_loc
         b_update.callback = crystal_mine_callback
         self.add_item(b_resource);  self.add_item(b_monster); self.add_item(b_charm); self.add_item(b_loc); self.add_item(b_update)
-
+        self.add_item(b_resource2); self.add_item(b_crystal)
+        
     async def open_form_resource(self, interaction: Interaction):
         view = ScreenerView(interaction.user.id, 'resource')
         await interaction.response.send_message("Resource Screener:", view=view, ephemeral=True)
 
-    
+    async def open_form_resource2(self, interaction: Interaction):
+        view = ScreenerView(interaction.user.id, 'resource2')
+        await interaction.response.send_message("Resource Screener2:", view=view, ephemeral=True)
+
+    async def open_form_crystal(self, interaction: Interaction):
+        view = ScreenerView(interaction.user.id, 'crystal')
+        await interaction.response.send_message("Crystal:", view=view, ephemeral=True)
+
     async def open_form_monster(self, interaction: Interaction):
         view = ScreenerView(interaction.user.id, 'monster')
         await interaction.response.send_message("Monster Screener:", view=view, ephemeral=True)
@@ -166,6 +182,10 @@ class ScreenerView(View):
             USER_CACHE[userid]= {
                         'resource': [],
                         'resource_level': [],
+                        'resource2': [],
+                        'resource2_level': [],
+                        'crystal': [],
+                        'crystal_level': [],
                         'charm': [],
                         'charm_level': [],
                         'monster': [],
@@ -175,6 +195,8 @@ class ScreenerView(View):
         
         category_map = {
             'resource' : ALLOWED_RESOURCES,
+            'resource2' : ALLOWED_RESOURCES,
+            'crystal' : ALLOWED_CRYSTAL,
             'monster' : ALLOWED_MONSTER,
             'charm' : ALLOWED_CHARM
         }
@@ -184,6 +206,10 @@ class ScreenerView(View):
             options_level = [
                 SelectOption(label=x, value=x, default=x in selected['%s_level' % category]) 
                 for x in range(1, 5)]
+        elif category == 'crystal':
+            options_level = [
+                SelectOption(label=x, value=x, default=x in selected['%s_level' % category]) 
+                for x in range(1, 6)]
         else:
             options_level = [
                 SelectOption(label=x, value=x, default=str(x) in selected['%s_level' % category]) 
@@ -243,7 +269,7 @@ if __name__ =='__main__':
     @bot.event
     async def on_ready():
         print(f'Logged in as {bot.user.name} (ID: {bot.user.id})')
-        view = LOKScreenerView()
+        view = LOKScreenerView(None)
         channel = bot.get_channel(CHANNEL_ID)
         await channel.purge(limit=10)
         await channel.send("Please select roles to apply:", view=view)

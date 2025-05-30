@@ -13,6 +13,10 @@ ALLOWED_RESOURCES = [
     {'name': 'Quarry', 'emoji': '⛰️'}
 ]
 
+ALLOWED_CRYSTAL = [
+    {'name': 'Crystal', 'emoji': '💎'}, 
+]
+
 ALLOWED_MONSTER = [
     {'name': 'Orc', 'emoji': '🪓'}, 
     {'name': 'Skeleton', 'emoji': '☠️'}, 

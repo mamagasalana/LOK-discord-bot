@@ -211,7 +211,16 @@ class LOKBOT:
         self.CRYSTAL_MINE_LAST_UPDATE =  now
         await interaction.response.send_message("Updating database ...", ephemeral=True)     
         self.CRYSTAL_MINE_LOADING = True
-        self.lokServiceManager.check_entire_map()
+
+        if world > 100_000: # cvc
+            # the crystal is around the corner
+            # look for the adjacent corner
+            self.lokServiceManager.check_entire_map(start_x=0, end_x=13, start_y=0, end_y = 400)
+            self.lokServiceManager.check_entire_map(start_x=50, end_x=63, start_y=0, end_y = 400)
+            self.lokServiceManager.check_entire_map(start_x=0, end_x=13, start_y=1600, end_y = 2000)
+            self.lokServiceManager.check_entire_map(start_x=50, end_x=63, start_y=1600, end_y = 2000)
+        else:
+            self.lokServiceManager.check_entire_map()
         # self.lokService.check_entire_map(start_y=0, end_y=2048)
         await self.lokServiceManager.start_wss()
 
